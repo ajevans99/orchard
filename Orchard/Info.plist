@@ -4,5 +4,7 @@
 <dict>
 	<key>LSMultipleInstancesProhibited</key>
 	<true/>
+	<key>OrchardTelemetryAppID</key>
+	<string>$(INFOPLIST_KEY_OrchardTelemetryAppID)</string>
 </dict>
 </plist>

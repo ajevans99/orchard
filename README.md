@@ -15,6 +15,13 @@ Orchard identifies a window from its application bundle ID and native title.
 That keeps labels across relaunches, but apps that frequently rewrite their
 window titles may receive a new identity.
 
+## Privacy
+
+Orchard sends anonymous usage signals through
+[TelemetryDeck](https://telemetrydeck.com) for key actions and outcomes.
+Window titles, application names, bundle identifiers, and window IDs are never
+included in telemetry.
+
 ## Install
 
 Tagged releases contain a signed and notarized universal build of `Orchard.app`

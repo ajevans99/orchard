@@ -170,13 +170,20 @@ final class OrchardController: ObservableObject {
     }
 
     func requestAccessibilityAccess() {
+        OrchardTelemetry.track(.accessibilitySettingsOpened)
         let options = ["AXTrustedCheckOptionPrompt": true]
         AXIsProcessTrustedWithOptions(options as CFDictionary)
         openAccessibilitySettings()
     }
 
-    func refresh() {
-        isAccessibilityTrusted = AXIsProcessTrusted()
+    func refresh(manual: Bool = false) {
+        let accessibilityTrusted = AXIsProcessTrusted()
+        if accessibilityTrusted != isAccessibilityTrusted {
+            OrchardTelemetry.track(
+                .accessibilityStatusChanged(isTrusted: accessibilityTrusted)
+            )
+        }
+        isAccessibilityTrusted = accessibilityTrusted
         loadLabels()
 
         guard isAccessibilityTrusted else {
@@ -188,6 +195,9 @@ final class OrchardController: ObservableObject {
             stopDisplayLink()
             stopAccessibilityObserver()
             outlineController.hide()
+            if manual {
+                trackRefresh()
+            }
             return
         }
 
@@ -206,6 +216,9 @@ final class OrchardController: ObservableObject {
         )
         processPendingCommand()
         updateOutline()
+        if manual {
+            trackRefresh()
+        }
     }
 
     func rename(_ windowID: String, title: String) {
@@ -218,6 +231,7 @@ final class OrchardController: ObservableObject {
             labels[windowID] = label
         }
         saveLabels()
+        OrchardTelemetry.track(.windowTitleChanged(hasTitle: label.title != nil))
         refresh()
     }
 
@@ -226,19 +240,35 @@ final class OrchardController: ObservableObject {
         label.color = color
         labels[windowID] = label
         saveLabels()
+        OrchardTelemetry.track(.windowColorChanged(color: color))
         refresh()
     }
 
     func clear(_ windowID: String) {
         labels.removeValue(forKey: windowID)
         saveLabels()
+        OrchardTelemetry.track(.windowLabelCleared)
         refresh()
     }
 
-    func focus(_ windowID: String) {
-        guard let tracked = trackedWindows[windowID] else { return }
-        NSRunningApplication(processIdentifier: tracked.processIdentifier)?.activate()
-        AXUIElementPerformAction(tracked.element, kAXRaiseAction as CFString)
+    func focus(_ windowID: String, source: OrchardFocusSource = .menuBar) {
+        guard let tracked = trackedWindows[windowID] else {
+            OrchardTelemetry.track(.windowFocused(source: source, succeeded: false))
+            return
+        }
+        let didActivate = NSRunningApplication(
+            processIdentifier: tracked.processIdentifier
+        )?.activate() ?? false
+        let raiseResult = AXUIElementPerformAction(
+            tracked.element,
+            kAXRaiseAction as CFString
+        )
+        OrchardTelemetry.track(
+            .windowFocused(
+                source: source,
+                succeeded: didActivate && raiseResult == .success
+            )
+        )
     }
 
     private func discoverWindows() -> [TrackedWindow] {
@@ -592,8 +622,20 @@ final class OrchardController: ObservableObject {
 
         switch command.action {
         case .focus:
-            focus(command.windowID)
+            focus(command.windowID, source: .commandLine)
         }
+    }
+
+    private func trackRefresh() {
+        OrchardTelemetry.track(
+            .windowListRefreshed(
+                windowCount: windows.count,
+                labeledWindowCount: windows.filter {
+                    $0.customTitle != nil || $0.color != nil
+                }.count,
+                accessibilityTrusted: isAccessibilityTrusted
+            )
+        )
     }
 
     private func loadLabels() {
