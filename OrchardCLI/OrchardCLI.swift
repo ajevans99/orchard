@@ -1,4 +1,5 @@
 import ArgumentParser
+import Darwin
 import Foundation
 
 enum OrchardColor: String, Codable, CaseIterable {
@@ -70,6 +71,20 @@ enum OrchardFiles {
 extension OrchardColor: ExpressibleByArgument {
     init?(argument: String) {
         self.init(rawValue: argument.lowercased())
+    }
+}
+
+private extension OrchardColor {
+    var ansiCode: String {
+        switch self {
+        case .red: "31"
+        case .orange: "38;5;208"
+        case .yellow: "33"
+        case .green: "32"
+        case .blue: "34"
+        case .purple: "35"
+        case .pink: "38;5;205"
+        }
     }
 }
 
@@ -225,11 +240,12 @@ private enum OrchardOperations {
                 + "\(pad("COLOR", to: 7))  NAME"
         )
         for window in snapshot.windows {
+            let name = colorizedName(for: window)
             print(
                 "\(pad(window.id, to: idWidth))  "
                     + "\(pad(window.appName, to: appWidth))  "
                     + "\(pad(window.color?.rawValue ?? "-", to: 7))  "
-                    + window.displayTitle
+                    + name
             )
         }
     }
@@ -274,4 +290,14 @@ private enum OrchardOperations {
         return value + String(repeating: " ", count: width - value.count)
     }
 
+    private static func colorizedName(for window: WindowRecord) -> String {
+        guard
+            isatty(STDOUT_FILENO) != 0,
+            ProcessInfo.processInfo.environment["NO_COLOR"] == nil,
+            let color = window.color
+        else {
+            return window.displayTitle
+        }
+        return "\u{001B}[\(color.ansiCode)m\(window.displayTitle)\u{001B}[0m"
+    }
 }
