@@ -1,0 +1,217 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Sign, notarize, and publish
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_APPLICATION_P12_BASE64 }}
+      CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_P12_PASSWORD }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+      APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Import Developer ID certificate
+        id: signing
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          : "${APPLE_TEAM_ID:?Missing APPLE_TEAM_ID secret}"
+          : "${CERTIFICATE_BASE64:?Missing DEVELOPER_ID_APPLICATION_P12_BASE64 secret}"
+          : "${CERTIFICATE_PASSWORD:?Missing DEVELOPER_ID_APPLICATION_P12_PASSWORD secret}"
+
+          CERTIFICATE_PATH="$RUNNER_TEMP/developer-id-application.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/orchard-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -P "$CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+
+          SIGNING_IDENTITY="$(
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" |
+              awk -F'"' '/Developer ID Application/ { print $2; exit }'
+          )"
+          if [[ -z "$SIGNING_IDENTITY" ]]; then
+            echo "No Developer ID Application identity was found in the certificate." >&2
+            exit 1
+          fi
+
+          echo "keychain-path=$KEYCHAIN_PATH" >> "$GITHUB_OUTPUT"
+          echo "certificate-path=$CERTIFICATE_PATH" >> "$GITHUB_OUTPUT"
+          echo "SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Build and sign release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DERIVED_DATA="$RUNNER_TEMP/DerivedData"
+          xcodebuild \
+            -project Orchard.xcodeproj \
+            -scheme Orchard \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$DERIVED_DATA" \
+            ARCHS="arm64 x86_64" \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            ENABLE_HARDENED_RUNTIME=YES \
+            build
+
+          xcodebuild \
+            -project Orchard.xcodeproj \
+            -scheme OrchardCLI \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$DERIVED_DATA" \
+            ARCHS="arm64 x86_64" \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+          APP_PATH="$DERIVED_DATA/Build/Products/Release/Orchard.app"
+          CLI_PATH="$DERIVED_DATA/Build/Products/Release/orchard"
+          codesign \
+            --force \
+            --options runtime \
+            --timestamp \
+            --sign "$SIGNING_IDENTITY" \
+            "$CLI_PATH"
+
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          codesign --verify --strict --verbose=2 "$CLI_PATH"
+
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+          echo "CLI_PATH=$CLI_PATH" >> "$GITHUB_ENV"
+
+      - name: Notarize release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          : "${APPLE_API_KEY_ID:?Missing APPLE_API_KEY_ID secret}"
+          : "${APPLE_API_ISSUER_ID:?Missing APPLE_API_ISSUER_ID secret}"
+          : "${APPLE_API_PRIVATE_KEY:?Missing APPLE_API_PRIVATE_KEY secret}"
+
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGING_PATH="$RUNNER_TEMP/Orchard-$VERSION"
+          NOTARIZATION_ARCHIVE="$RUNNER_TEMP/Orchard-notarization.zip"
+          RELEASE_ARCHIVE="$RUNNER_TEMP/Orchard-$GITHUB_REF_NAME-macOS.zip"
+          API_KEY_PATH="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY_ID.p8"
+
+          mkdir -p "$STAGING_PATH"
+          ditto "$APP_PATH" "$STAGING_PATH/Orchard.app"
+          cp "$CLI_PATH" "$STAGING_PATH/orchard"
+          chmod +x "$STAGING_PATH/orchard"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$API_KEY_PATH"
+
+          ditto -c -k --sequesterRsrc "$STAGING_PATH" "$NOTARIZATION_ARCHIVE"
+          xcrun notarytool submit "$NOTARIZATION_ARCHIVE" \
+            --key "$API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER_ID" \
+            --wait
+
+          xcrun stapler staple "$STAGING_PATH/Orchard.app"
+          xcrun stapler validate "$STAGING_PATH/Orchard.app"
+          spctl --assess --type execute --verbose=2 "$STAGING_PATH/Orchard.app"
+
+          ditto -c -k --sequesterRsrc "$STAGING_PATH" "$RELEASE_ARCHIVE"
+          echo "RELEASE_ARCHIVE=$RELEASE_ARCHIVE" >> "$GITHUB_ENV"
+          echo "RELEASE_SHA256=$(shasum -a 256 "$RELEASE_ARCHIVE" | awk '{ print $1 }')" \
+            >> "$GITHUB_ENV"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            "$RELEASE_ARCHIVE" \
+            --verify-tag \
+            --generate-notes \
+            --title "Orchard $GITHUB_REF_NAME"
+
+      - name: Check out Homebrew tap
+        if: env.HOMEBREW_TAP_TOKEN != ''
+        uses: actions/checkout@v7
+        with:
+          repository: ajevans99/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Homebrew cask
+        if: env.HOMEBREW_TAP_TOKEN != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p homebrew-tap/Casks
+          cat > homebrew-tap/Casks/orchard.rb <<EOF
+          cask "orchard" do
+            version "$VERSION"
+            sha256 "$RELEASE_SHA256"
+
+            url "https://github.com/ajevans99/orchard/releases/download/v#{version}/Orchard-v#{version}-macOS.zip"
+            name "Orchard"
+            desc "Name, color, and focus windows across macOS applications"
+            homepage "https://github.com/ajevans99/orchard"
+
+            depends_on macos: ">= :sonoma"
+
+            app "Orchard.app"
+            binary "orchard"
+          end
+          EOF
+
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/orchard.rb
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Update Orchard to $VERSION"
+          git push
+
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: |
+          security delete-keychain "${{ steps.signing.outputs.keychain-path }}" 2>/dev/null || true
+          rm -f \
+            "${{ steps.signing.outputs.certificate-path }}" \
+            "$RUNNER_TEMP"/AuthKey_*.p8

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="28"/>
+    </filter>
+    <filter id="nearGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+  </defs>
+  <rect x="174" y="190" width="676" height="600" rx="92" fill="none" stroke="#40E884" stroke-width="34" opacity=".48" filter="url(#softGlow)"/>
+  <rect x="174" y="190" width="676" height="600" rx="92" fill="none" stroke="#55F097" stroke-width="14" opacity=".38" filter="url(#nearGlow)"/>
+</svg>

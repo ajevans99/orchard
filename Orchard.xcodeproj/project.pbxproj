@@ -3,8 +3,12 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 110;
+	objectVersion = 77;
 	objects = {
+
+/* Begin PBXBuildFile section */
+		189791B98B33558FFFC5A81E /* ArgumentParser in Frameworks */ = {isa = PBXBuildFile; productRef = 4848FE3E5B6081387283C954 /* ArgumentParser */; };
+/* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		2532488C304749A80046C0FA /* PBXContainerItemProxy */ = {
@@ -26,8 +30,9 @@
 /* Begin PBXCopyFilesBuildPhase section */
 		253248A8304749B80046C0FA /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
 			dstPath = /usr/share/man/man1/;
-			dstSubfolder = None;
+			dstSubfolderSpec = 0;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 1;
@@ -41,9 +46,22 @@
 		253248AA304749B80046C0FA /* orchard */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = orchard; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		2532490A304784CC0046C0FA /* Exceptions for "Orchard" folder in "Orchard" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 2532487D304749A70046C0FA /* Orchard */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		25324880304749A70046C0FA /* Orchard */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2532490A304784CC0046C0FA /* Exceptions for "Orchard" folder in "Orchard" target */,
+			);
 			path = Orchard;
 			sourceTree = "<group>";
 		};
@@ -67,23 +85,32 @@
 /* Begin PBXFrameworksBuildPhase section */
 		2532487B304749A70046C0FA /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		25324888304749A80046C0FA /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		25324892304749A80046C0FA /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		253248A7304749B80046C0FA /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
+				189791B98B33558FFFC5A81E /* ArgumentParser in Frameworks */,
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
@@ -123,10 +150,14 @@
 			);
 			buildRules = (
 			);
+			dependencies = (
+			);
 			fileSystemSynchronizedGroups = (
 				25324880304749A70046C0FA /* Orchard */,
 			);
 			name = Orchard;
+			packageProductDependencies = (
+			);
 			productName = Orchard;
 			productReference = 2532487E304749A70046C0FA /* Orchard.app */;
 			productType = "com.apple.product-type.application";
@@ -148,6 +179,8 @@
 				2532488E304749A80046C0FA /* OrchardTests */,
 			);
 			name = OrchardTests;
+			packageProductDependencies = (
+			);
 			productName = OrchardTests;
 			productReference = 2532488B304749A80046C0FA /* OrchardTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -169,6 +202,8 @@
 				25324898304749A80046C0FA /* OrchardUITests */,
 			);
 			name = OrchardUITests;
+			packageProductDependencies = (
+			);
 			productName = OrchardUITests;
 			productReference = 25324895304749A80046C0FA /* OrchardUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
@@ -183,10 +218,15 @@
 			);
 			buildRules = (
 			);
+			dependencies = (
+			);
 			fileSystemSynchronizedGroups = (
 				253248AB304749B80046C0FA /* OrchardCLI */,
 			);
 			name = OrchardCLI;
+			packageProductDependencies = (
+				4848FE3E5B6081387283C954 /* ArgumentParser */,
+			);
 			productName = OrchardCLI;
 			productReference = 253248AA304749B80046C0FA /* orchard */;
 			productType = "com.apple.product-type.tool";
@@ -226,6 +266,9 @@
 			);
 			mainGroup = 25324875304749A70046C0FA;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				499813A0C86BB294AB0C85A0 /* XCRemoteSwiftPackageReference "swift-argument-parser" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 2532487F304749A70046C0FA /* Products */;
 			projectDirPath = "";
@@ -242,41 +285,55 @@
 /* Begin PBXResourcesBuildPhase section */
 		2532487C304749A70046C0FA /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		25324889304749A80046C0FA /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		25324893304749A80046C0FA /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		2532487A304749A70046C0FA /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		25324887304749A80046C0FA /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		25324891304749A80046C0FA /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		253248A6304749B80046C0FA /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
@@ -294,7 +351,7 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		2532489B304749A80046C0FA /* Debug configuration for PBXProject "Orchard" */ = {
+		2532489B304749A80046C0FA /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -355,7 +412,7 @@
 			};
 			name = Debug;
 		};
-		2532489C304749A80046C0FA /* Release configuration for PBXProject "Orchard" */ = {
+		2532489C304749A80046C0FA /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -408,17 +465,19 @@
 			};
 			name = Release;
 		};
-		2532489E304749A80046C0FA /* Debug configuration for PBXNativeTarget "Orchard" */ = {
+		2532489E304749A80046C0FA /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Orchard/Info.plist;
 				INFOPLIST_KEY_LSUIElement = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -435,7 +494,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = io.github.orchardapp.Orchard;
+				PRODUCT_BUNDLE_IDENTIFIER = us.atlasapps.orchardapp.Orchard;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
@@ -445,23 +504,25 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				XROS_DEPLOYMENT_TARGET = 27.0;
 			};
 			name = Debug;
 		};
-		2532489F304749A80046C0FA /* Release configuration for PBXNativeTarget "Orchard" */ = {
+		2532489F304749A80046C0FA /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Orchard/Info.plist;
 				INFOPLIST_KEY_LSUIElement = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -478,7 +539,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = io.github.orchardapp.Orchard;
+				PRODUCT_BUNDLE_IDENTIFIER = us.atlasapps.orchardapp.Orchard;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
@@ -488,13 +549,13 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				XROS_DEPLOYMENT_TARGET = 27.0;
 			};
 			name = Release;
 		};
-		253248A1304749A80046C0FA /* Debug configuration for PBXNativeTarget "OrchardTests" */ = {
+		253248A1304749A80046C0FA /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
@@ -512,14 +573,14 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Orchard.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Orchard";
 				XROS_DEPLOYMENT_TARGET = 27.0;
 			};
 			name = Debug;
 		};
-		253248A2304749A80046C0FA /* Release configuration for PBXNativeTarget "OrchardTests" */ = {
+		253248A2304749A80046C0FA /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
@@ -537,14 +598,14 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Orchard.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Orchard";
 				XROS_DEPLOYMENT_TARGET = 27.0;
 			};
 			name = Release;
 		};
-		253248A4304749A80046C0FA /* Debug configuration for PBXNativeTarget "OrchardUITests" */ = {
+		253248A4304749A80046C0FA /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
@@ -561,14 +622,14 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				TEST_TARGET_NAME = Orchard;
 				XROS_DEPLOYMENT_TARGET = 27.0;
 			};
 			name = Debug;
 		};
-		253248A5304749A80046C0FA /* Release configuration for PBXNativeTarget "OrchardUITests" */ = {
+		253248A5304749A80046C0FA /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
@@ -585,14 +646,14 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				TEST_TARGET_NAME = Orchard;
 				XROS_DEPLOYMENT_TARGET = 27.0;
 			};
 			name = Release;
 		};
-		253248AF304749B80046C0FA /* Debug configuration for PBXNativeTarget "OrchardCLI" */ = {
+		253248AF304749B80046C0FA /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
@@ -601,11 +662,11 @@
 				SDKROOT = macosx;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
-		253248B0304749B80046C0FA /* Release configuration for PBXNativeTarget "OrchardCLI" */ = {
+		253248B0304749B80046C0FA /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
@@ -614,7 +675,7 @@
 				SDKROOT = macosx;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
@@ -624,45 +685,68 @@
 		25324879304749A70046C0FA /* Build configuration list for PBXProject "Orchard" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				2532489B304749A80046C0FA /* Debug configuration for PBXProject "Orchard" */,
-				2532489C304749A80046C0FA /* Release configuration for PBXProject "Orchard" */,
+				2532489B304749A80046C0FA /* Debug */,
+				2532489C304749A80046C0FA /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		2532489D304749A80046C0FA /* Build configuration list for PBXNativeTarget "Orchard" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				2532489E304749A80046C0FA /* Debug configuration for PBXNativeTarget "Orchard" */,
-				2532489F304749A80046C0FA /* Release configuration for PBXNativeTarget "Orchard" */,
+				2532489E304749A80046C0FA /* Debug */,
+				2532489F304749A80046C0FA /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		253248A0304749A80046C0FA /* Build configuration list for PBXNativeTarget "OrchardTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				253248A1304749A80046C0FA /* Debug configuration for PBXNativeTarget "OrchardTests" */,
-				253248A2304749A80046C0FA /* Release configuration for PBXNativeTarget "OrchardTests" */,
+				253248A1304749A80046C0FA /* Debug */,
+				253248A2304749A80046C0FA /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		253248A3304749A80046C0FA /* Build configuration list for PBXNativeTarget "OrchardUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				253248A4304749A80046C0FA /* Debug configuration for PBXNativeTarget "OrchardUITests" */,
-				253248A5304749A80046C0FA /* Release configuration for PBXNativeTarget "OrchardUITests" */,
+				253248A4304749A80046C0FA /* Debug */,
+				253248A5304749A80046C0FA /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		253248AE304749B80046C0FA /* Build configuration list for PBXNativeTarget "OrchardCLI" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				253248AF304749B80046C0FA /* Debug configuration for PBXNativeTarget "OrchardCLI" */,
-				253248B0304749B80046C0FA /* Release configuration for PBXNativeTarget "OrchardCLI" */,
+				253248AF304749B80046C0FA /* Debug */,
+				253248B0304749B80046C0FA /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		499813A0C86BB294AB0C85A0 /* XCRemoteSwiftPackageReference "swift-argument-parser" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-argument-parser.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.8.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		4848FE3E5B6081387283C954 /* ArgumentParser */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 499813A0C86BB294AB0C85A0 /* XCRemoteSwiftPackageReference "swift-argument-parser" */;
+			productName = ArgumentParser;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 25324876304749A70046C0FA /* Project object */;
-	validationLevel = 1;
 }

@@ -1,3 +1,4 @@
+import ArgumentParser
 import Foundation
 
 enum OrchardColor: String, Codable, CaseIterable {
@@ -66,88 +67,140 @@ enum OrchardFiles {
     }
 }
 
+extension OrchardColor: ExpressibleByArgument {
+    init?(argument: String) {
+        self.init(rawValue: argument.lowercased())
+    }
+}
+
 enum CLIError: LocalizedError {
-    case usage(String)
     case appNotRunning
     case unknownWindow(String)
-    case unknownColor(String)
 
     var errorDescription: String? {
         switch self {
-        case .usage(let message): message
         case .appNotRunning:
             "No Orchard window snapshot found. Launch Orchard and grant Accessibility access first."
         case .unknownWindow(let id):
             "No window with ID '\(id)' exists in Orchard's latest snapshot."
-        case .unknownColor(let color):
-            "Unknown color '\(color)'. Use: \(OrchardColor.allCases.map(\.rawValue).joined(separator: ", "))."
         }
     }
 }
 
 @main
-struct OrchardCLI {
-    static func main() {
-        do {
-            try run(Array(CommandLine.arguments.dropFirst()))
-        } catch {
-            fputs("orchard: \(error.localizedDescription)\n", stderr)
-            exit(1)
+struct OrchardCLI: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "orchard",
+        abstract: "Name, color, and focus your macOS windows.",
+        subcommands: [
+            ListCommand.self,
+            LabelCommand.self,
+            ColorCommand.self,
+            FocusCommand.self,
+            ClearCommand.self,
+        ]
+    )
+}
+
+private struct ListCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "list",
+        abstract: "List windows visible to Orchard."
+    )
+
+    @Flag(name: .long, help: "Print the window list as JSON.")
+    var json = false
+
+    mutating func run() throws {
+        try OrchardOperations.list(json: json)
+    }
+}
+
+private struct LabelCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "label",
+        abstract: "Set a title tag for a window."
+    )
+
+    @Argument(help: "The window ID shown by 'orchard list'.")
+    var windowID: String
+
+    @Argument(parsing: .remaining, help: "The title to display for the window.")
+    var title: [String]
+
+    func validate() throws {
+        guard !title.isEmpty else {
+            throw ValidationError("Provide a title for the window.")
         }
     }
 
-    private static func run(_ arguments: [String]) throws {
-        guard let command = arguments.first else {
-            printUsage()
-            return
-        }
-
-        switch command {
-        case "list":
-            try list(json: arguments.dropFirst().first == "--json")
-        case "label":
-            guard arguments.count >= 3 else {
-                throw CLIError.usage("Usage: orchard label <window-id> <name>")
-            }
-            try updateLabel(
-                windowID: arguments[1],
-                title: arguments.dropFirst(2).joined(separator: " ")
-            )
-        case "color":
-            guard arguments.count == 3 else {
-                throw CLIError.usage("Usage: orchard color <window-id> <color>")
-            }
-            guard let color = OrchardColor(rawValue: arguments[2].lowercased()) else {
-                throw CLIError.unknownColor(arguments[2])
-            }
-            try updateColor(windowID: arguments[1], color: color)
-        case "focus":
-            guard arguments.count == 2 else {
-                throw CLIError.usage("Usage: orchard focus <window-id>")
-            }
-            try requireWindow(arguments[1])
-            try OrchardFiles.save(
-                OrchardCommand(action: .focus, windowID: arguments[1], createdAt: Date()),
-                to: OrchardFiles.command
-            )
-            print("Focus requested for \(arguments[1]).")
-        case "clear":
-            guard arguments.count == 2 else {
-                throw CLIError.usage("Usage: orchard clear <window-id>")
-            }
-            try requireWindow(arguments[1])
-            var labels = loadLabels()
-            labels.removeValue(forKey: arguments[1])
-            try OrchardFiles.save(labels, to: OrchardFiles.labels)
-            print("Cleared \(arguments[1]).")
-        case "help", "--help", "-h":
-            printUsage()
-        default:
-            throw CLIError.usage("Unknown command '\(command)'. Run orchard help.")
-        }
+    mutating func run() throws {
+        try OrchardOperations.updateLabel(
+            windowID: windowID,
+            title: title.joined(separator: " ")
+        )
     }
+}
 
-    private static func list(json: Bool) throws {
+private struct ColorCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "color",
+        abstract: "Set a window's outline color."
+    )
+
+    @Argument(help: "The window ID shown by 'orchard list'.")
+    var windowID: String
+
+    @Argument(
+        help: "The outline color.",
+        completion: .list(OrchardColor.allCases.map(\.rawValue))
+    )
+    var color: OrchardColor
+
+    mutating func run() throws {
+        try OrchardOperations.updateColor(windowID: windowID, color: color)
+    }
+}
+
+private struct FocusCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "focus",
+        abstract: "Bring a window to the front."
+    )
+
+    @Argument(help: "The window ID shown by 'orchard list'.")
+    var windowID: String
+
+    mutating func run() throws {
+        try OrchardOperations.requireWindow(windowID)
+        try OrchardFiles.save(
+            OrchardCommand(action: .focus, windowID: windowID, createdAt: Date()),
+            to: OrchardFiles.command
+        )
+        print("Focus requested for \(windowID).")
+    }
+}
+
+private struct ClearCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "clear",
+        abstract: "Remove a window's title and color."
+    )
+
+    @Argument(help: "The window ID shown by 'orchard list'.")
+    var windowID: String
+
+    mutating func run() throws {
+        try OrchardOperations.requireWindow(windowID)
+        var labels = OrchardOperations.loadLabels()
+        labels.removeValue(forKey: windowID)
+        try OrchardFiles.save(labels, to: OrchardFiles.labels)
+        print("Cleared \(windowID).")
+    }
+}
+
+private enum OrchardOperations {
+    static func list(json: Bool) throws {
         guard let snapshot = try? OrchardFiles.load(WindowSnapshot.self, from: OrchardFiles.snapshot) else {
             throw CLIError.appNotRunning
         }
@@ -181,7 +234,7 @@ struct OrchardCLI {
         }
     }
 
-    private static func updateLabel(windowID: String, title: String) throws {
+    static func updateLabel(windowID: String, title: String) throws {
         try requireWindow(windowID)
         var labels = loadLabels()
         var label = labels[windowID] ?? WindowLabel(title: nil, color: .green)
@@ -191,7 +244,7 @@ struct OrchardCLI {
         print("Labeled \(windowID) as '\(title)'.")
     }
 
-    private static func updateColor(windowID: String, color: OrchardColor) throws {
+    static func updateColor(windowID: String, color: OrchardColor) throws {
         try requireWindow(windowID)
         var labels = loadLabels()
         var label = labels[windowID] ?? WindowLabel(title: nil, color: nil)
@@ -201,7 +254,7 @@ struct OrchardCLI {
         print("Set \(windowID) to \(color.rawValue).")
     }
 
-    private static func requireWindow(_ windowID: String) throws {
+    static func requireWindow(_ windowID: String) throws {
         guard
             let snapshot = try? OrchardFiles.load(WindowSnapshot.self, from: OrchardFiles.snapshot),
             snapshot.windows.contains(where: { $0.id == windowID })
@@ -210,7 +263,7 @@ struct OrchardCLI {
         }
     }
 
-    private static func loadLabels() -> [String: WindowLabel] {
+    static func loadLabels() -> [String: WindowLabel] {
         (try? OrchardFiles.load([String: WindowLabel].self, from: OrchardFiles.labels)) ?? [:]
     }
 
@@ -221,18 +274,4 @@ struct OrchardCLI {
         return value + String(repeating: " ", count: width - value.count)
     }
 
-    private static func printUsage() {
-        print(
-            """
-            Orchard window labels
-
-            Usage:
-              orchard list [--json]
-              orchard label <window-id> <name>
-              orchard color <window-id> <red|orange|yellow|green|blue|purple|pink>
-              orchard focus <window-id>
-              orchard clear <window-id>
-            """
-        )
-    }
 }

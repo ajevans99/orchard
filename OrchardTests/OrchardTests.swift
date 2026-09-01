@@ -2,7 +2,7 @@ import Testing
 @testable import Orchard
 
 struct OrchardTests {
-    @Test func windowIdentifiersAreStableAndDistinct() {
+    @Test @MainActor func windowIdentifiersAreStableAndDistinct() {
         let first = WindowIdentifier.make(
             bundleIdentifier: "com.apple.dt.Xcode",
             nativeTitle: "Orchard"
@@ -22,7 +22,7 @@ struct OrchardTests {
         #expect(first.count == 8)
     }
 
-    @Test func customTitleOverridesNativeTitle() {
+    @Test @MainActor func customTitleOverridesNativeTitle() {
         let record = WindowRecord(
             id: "12345678",
             appName: "Xcode",

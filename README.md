@@ -15,6 +15,17 @@ Orchard identifies a window from its application bundle ID and native title.
 That keeps labels across relaunches, but apps that frequently rewrite their
 window titles may receive a new identity.
 
+## Install
+
+Tagged releases contain a signed and notarized universal build of `Orchard.app`
+and the `orchard` CLI. Download the latest archive from
+[GitHub Releases](https://github.com/ajevans99/orchard/releases), or install
+both through Homebrew:
+
+```sh
+brew install --cask ajevans99/tap/orchard
+```
+
 ## Build
 
 Open `Orchard.xcodeproj`, select the **Orchard** scheme and run it on **My Mac**.
@@ -30,6 +41,23 @@ cp ~/Library/Developer/Xcode/DerivedData/Orchard-*/Build/Products/Debug/orchard 
 ```
 
 Ensure `~/.local/bin` is on your `PATH`.
+
+## Publishing a release
+
+Create the `ajevans99/homebrew-tap` repository and add these GitHub Actions
+secrets to this repository:
+
+- `APPLE_TEAM_ID`
+- `DEVELOPER_ID_APPLICATION_P12_BASE64`
+- `DEVELOPER_ID_APPLICATION_P12_PASSWORD`
+- `APPLE_API_KEY_ID`
+- `APPLE_API_ISSUER_ID`
+- `APPLE_API_PRIVATE_KEY`
+- `HOMEBREW_TAP_TOKEN` with write access to `ajevans99/homebrew-tap`
+
+Push a version tag such as `v1.0` to build, sign, notarize, and publish the
+release. When `HOMEBREW_TAP_TOKEN` is configured, the workflow also updates the
+tap's `Casks/orchard.rb`.
 
 ## CLI
 

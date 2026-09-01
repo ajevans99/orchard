@@ -6,12 +6,25 @@ struct ContentView: View {
     @State private var searchText = ""
 
     private var filteredWindows: [WindowRecord] {
-        guard !searchText.isEmpty else { return controller.windows }
-        return controller.windows.filter {
-            $0.appName.localizedCaseInsensitiveContains(searchText)
-                || $0.displayTitle.localizedCaseInsensitiveContains(searchText)
-                || $0.nativeTitle.localizedCaseInsensitiveContains(searchText)
+        var matchingWindows = controller.windows
+        if !searchText.isEmpty {
+            matchingWindows = matchingWindows.filter {
+                $0.appName.localizedCaseInsensitiveContains(searchText)
+                    || $0.displayTitle.localizedCaseInsensitiveContains(searchText)
+                    || $0.nativeTitle.localizedCaseInsensitiveContains(searchText)
+            }
         }
+
+        if let activeWindowID = controller.activeWindowID,
+           let activeIndex = matchingWindows.firstIndex(where: { $0.id == activeWindowID }) {
+            let activeWindow = matchingWindows.remove(at: activeIndex)
+            matchingWindows.insert(activeWindow, at: 0)
+        }
+        return matchingWindows
+    }
+
+    private var windowListHeight: CGFloat {
+        min(max(CGFloat(filteredWindows.count) * 62, 100), 430)
     }
 
     var body: some View {
@@ -31,6 +44,7 @@ struct ContentView: View {
             } else {
                 TextField("Find a window", text: $searchText)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("window-search")
                     .padding(12)
 
                 ScrollView {
@@ -42,29 +56,24 @@ struct ContentView: View {
                     .padding(.horizontal, 12)
                     .padding(.bottom, 12)
                 }
-                .frame(maxHeight: 430)
+                .frame(height: windowListHeight)
             }
 
             Divider()
             footer
         }
         .frame(width: 420)
+        .accessibilityIdentifier("orchard-menu")
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "apple.logo")
-                .font(.title2)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Orchard")
-                    .font(.headline)
-                Text("Name, color, and focus your windows")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+        HStack {
+            Text("Orchard")
+                .font(.title3.weight(.semibold))
             Spacer()
         }
-        .padding(14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
     }
 
     private var permissionView: some View {
@@ -117,6 +126,15 @@ private struct WindowRow: View {
     let window: WindowRecord
     @ObservedObject var controller: OrchardController
     @State private var draftTitle: String
+    @FocusState private var isTitleFocused: Bool
+
+    private var isActive: Bool {
+        controller.activeWindowID == window.id
+    }
+
+    private var accentColor: Color {
+        window.color?.swiftUIColor ?? .accentColor
+    }
 
     init(window: WindowRecord, controller: OrchardController) {
         self.window = window
@@ -137,11 +155,26 @@ private struct WindowRow: View {
             .help("Focus this window")
 
             VStack(alignment: .leading, spacing: 4) {
-                TextField(window.nativeTitle, text: $draftTitle)
-                    .textFieldStyle(.plain)
-                    .font(.headline)
+                HStack(spacing: 6) {
+                    Image(systemName: "tag.fill")
+                        .font(.caption)
+                        .foregroundStyle(window.color?.swiftUIColor ?? .secondary)
+                    TextField("Add a title tag", text: $draftTitle)
+                        .textFieldStyle(.plain)
+                        .font(.headline)
+                        .focused($isTitleFocused)
+                    if isActive {
+                        Text("ACTIVE")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(accentColor)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(accentColor.opacity(0.14), in: Capsule())
+                            .accessibilityIdentifier("active-window-badge")
+                    }
+                }
                     .onSubmit {
-                        controller.rename(window.id, title: draftTitle)
+                        saveTitle()
                     }
                 Text("\(window.appName) · \(window.nativeTitle)")
                     .font(.caption)
@@ -180,10 +213,32 @@ private struct WindowRow: View {
             }
         }
         .padding(10)
-        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+        .background(
+            isActive ? accentColor.opacity(0.14) : Color.primary.opacity(0.055),
+            in: RoundedRectangle(cornerRadius: 10)
+        )
+        .overlay {
+            if isActive {
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(accentColor.opacity(0.7), lineWidth: 1.5)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("window-row-\(window.id)")
         .onChange(of: window.customTitle) { _, title in
             draftTitle = title ?? ""
         }
+        .onChange(of: isTitleFocused) { _, isFocused in
+            if !isFocused {
+                saveTitle()
+            }
+        }
+    }
+
+    private func saveTitle() {
+        let savedTitle = window.customTitle ?? ""
+        guard draftTitle != savedTitle else { return }
+        controller.rename(window.id, title: draftTitle)
     }
 }
 

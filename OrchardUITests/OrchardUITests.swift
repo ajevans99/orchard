@@ -1,43 +1,48 @@
-//
-//  OrchardUITests.swift
-//  OrchardUITests
-//
-//  Created by Austin Evans on 9/1/26.
-//
-
 import XCTest
 
 final class OrchardUITests: XCTestCase {
-
     override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
-
-        // In UI tests it is usually best to stop immediately when a failure occurs.
         continueAfterFailure = false
-
-        // In UI tests it’s important to set the initial state - such as interface orientation - required for your tests before they run. The setUp method is a good place to do this.
-    }
-
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testActiveWindowIsPinnedAndSearchable() async throws {
         let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
         app.launch()
+        addTeardownBlock {
+            app.terminate()
+        }
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
+        let testWindow = app.windows["Orchard UI Tests"]
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertTrue(testWindow.exists)
+
+        let activeRow = testWindow.descendants(matching: .any)["window-row-ui-active"]
+        let finderRow = testWindow.descendants(matching: .any)["window-row-ui-finder"]
+        XCTAssertTrue(activeRow.exists)
+        XCTAssertTrue(finderRow.exists)
+        XCTAssertEqual(activeRow.textFields.firstMatch.value as? String, "Hello, Orchard")
+        XCTAssertTrue(activeRow.staticTexts["ACTIVE"].exists)
+        XCTAssertLessThan(activeRow.frame.minY, finderRow.frame.minY)
+
+        let searchField = testWindow.textFields.firstMatch
+        XCTAssertTrue(searchField.exists)
+        XCTAssertEqual(searchField.placeholderValue, "Find a window")
+        searchField.click()
+        searchField.typeText("Finder")
+
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertTrue(finderRow.exists)
+        XCTAssertFalse(activeRow.exists)
     }
 
     @MainActor
     func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
+            let app = XCUIApplication()
+            app.launchArguments = ["--ui-testing"]
+            app.launch()
         }
     }
 }
