@@ -250,6 +250,38 @@ struct OrchardTests {
         )
     }
 
+    @Test func legacyCommandMigrationIsAtomicallyClaimed() throws {
+        let root = try Self.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = OrchardPaths(directory: root)
+        let legacy = OrchardCommand(
+            action: .setTitle,
+            windowID: "window",
+            title: "Legacy"
+        )
+        try OrchardJSON.save(legacy, to: paths.legacyCommand)
+
+        #expect(try OrchardCommandQueue.claimLegacyCommand(paths: paths))
+        #expect(!FileManager.default.fileExists(atPath: paths.legacyCommand.path))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: paths.legacyProcessingCommand.path
+            )
+        )
+        #expect(try !OrchardCommandQueue.claimLegacyCommand(paths: paths))
+        let entries = try OrchardCommandQueue.processingEntries(paths: paths)
+        #expect(entries.count == 1)
+        if case .command(let url, let command) = entries[0] {
+            #expect(
+                url.resolvingSymlinksInPath()
+                    == paths.legacyProcessingCommand.resolvingSymlinksInPath()
+            )
+            #expect(command == legacy)
+        } else {
+            Issue.record("Expected the claimed legacy command.")
+        }
+    }
+
     @Test func commandCompletionPublishesObservableSnapshotFirst() throws {
         let root = try Self.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -437,6 +469,91 @@ struct OrchardTests {
             )
         )
         #expect(try OrchardCommandQueue.processingEntries(paths: paths).isEmpty)
+    }
+
+    @Test func commandResultPublicationPrunesOldAndExcessResults() throws {
+        let root = try Self.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = OrchardPaths(directory: root)
+        let now = Date()
+        try FileManager.default.createDirectory(
+            at: paths.commandResults,
+            withIntermediateDirectories: true
+        )
+        for index in 0...OrchardConstants.maximumRetainedCommandResults {
+            let result = OrchardCommandResult(
+                commandID: UUID(),
+                succeeded: true,
+                message: "\(index)",
+                processedAt: now
+            )
+            let url = paths.resultURL(for: result.commandID)
+            try OrchardJSON.save(result, to: url)
+            try FileManager.default.setAttributes(
+                [.modificationDate: now.addingTimeInterval(Double(index))],
+                ofItemAtPath: url.path
+            )
+        }
+        let oldResult = OrchardCommandResult(
+            commandID: UUID(),
+            succeeded: true,
+            message: "old",
+            processedAt: now
+        )
+        let oldURL = paths.resultURL(for: oldResult.commandID)
+        try OrchardJSON.save(oldResult, to: oldURL)
+        try FileManager.default.setAttributes(
+            [
+                .modificationDate: now.addingTimeInterval(
+                    -OrchardConstants.commandResultRetentionInterval - 1
+                ),
+            ],
+            ofItemAtPath: oldURL.path
+        )
+        let published = OrchardCommandResult(
+            commandID: UUID(),
+            succeeded: true,
+            message: "new",
+            processedAt: now
+        )
+        let completionURL = paths.commandProcessing
+            .appendingPathComponent("completion.json")
+        try OrchardJSON.save(published, to: completionURL)
+
+        try OrchardCommandQueue.publishCompleted(
+            published,
+            completionURL: completionURL,
+            paths: paths
+        )
+
+        let retained = try FileManager.default.contentsOfDirectory(
+            at: paths.commandResults,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "json" }
+        #expect(retained.count == OrchardConstants.maximumRetainedCommandResults)
+        #expect(!FileManager.default.fileExists(atPath: oldURL.path))
+        #expect(
+            FileManager.default.fileExists(
+                atPath: paths.resultURL(for: published.commandID).path
+            )
+        )
+    }
+
+    @Test func commandWaitTimeoutRejectsUnsafeOverrides() throws {
+        #expect(
+            try OrchardCommandWaitPolicy.interval(environmentValue: nil)
+                == OrchardConstants.commandWaitInterval
+        )
+        #expect(try OrchardCommandWaitPolicy.interval(environmentValue: "1.5") == 1.5)
+        for value in ["", "0", "-1", "nan", "inf", "not-a-number"] {
+            Self.expectProtocolError(
+                .invalidCommand(
+                    "ORCHARD_COMMAND_WAIT_TIMEOUT must be a finite number greater than zero"
+                )
+            ) {
+                try OrchardCommandWaitPolicy.interval(environmentValue: value)
+            }
+        }
     }
 
     @Test func staleQueuedCommandsAreRejected() {

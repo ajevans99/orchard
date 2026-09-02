@@ -851,35 +851,11 @@ final class OrchardController: ObservableObject {
     }
 
     private func migrateLegacyCommand(paths: OrchardPaths) {
-        guard FileManager.default.fileExists(atPath: paths.legacyCommand.path) else {
-            return
-        }
-        let command: OrchardCommand
         do {
-            command = try OrchardJSON.load(
-                OrchardCommand.self,
-                from: paths.legacyCommand
-            )
+            _ = try OrchardCommandQueue.claimLegacyCommand(paths: paths)
         } catch {
             logger.error(
-                "Discarding malformed legacy command: \(error.localizedDescription, privacy: .public)"
-            )
-            do {
-                try FileManager.default.removeItem(at: paths.legacyCommand)
-            } catch {
-                logger.error(
-                    "Unable to remove malformed legacy command: \(error.localizedDescription, privacy: .public)"
-                )
-            }
-            return
-        }
-
-        do {
-            try OrchardCommandQueue.enqueue(command, paths: paths)
-            try FileManager.default.removeItem(at: paths.legacyCommand)
-        } catch {
-            logger.error(
-                "Unable to migrate legacy command: \(error.localizedDescription, privacy: .public)"
+                "Unable to claim legacy command: \(error.localizedDescription, privacy: .public)"
             )
         }
     }

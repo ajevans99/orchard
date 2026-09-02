@@ -6,6 +6,8 @@ nonisolated enum OrchardConstants {
     static let snapshotFreshnessInterval = discoveryRefreshInterval * 3
     static let commandFreshnessInterval = discoveryRefreshInterval * 3
     static let commandWaitInterval = commandFreshnessInterval + discoveryRefreshInterval
+    static let commandResultRetentionInterval: TimeInterval = 24 * 60 * 60
+    static let maximumRetainedCommandResults = 256
 }
 
 nonisolated enum OrchardColor: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -250,6 +252,9 @@ nonisolated struct OrchardPaths: Sendable {
         directory.appendingPathComponent("command-results", isDirectory: true)
     }
     var legacyCommand: URL { directory.appendingPathComponent("command.json") }
+    var legacyProcessingCommand: URL {
+        commandProcessing.appendingPathComponent("legacy-command.json")
+    }
 
     func commandURL(for id: UUID) -> URL {
         commandQueue.appendingPathComponent("\(id.uuidString.lowercased()).json")
@@ -277,6 +282,21 @@ nonisolated enum OrchardJSON {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(value).write(to: url, options: .atomic)
+    }
+}
+
+nonisolated enum OrchardCommandWaitPolicy {
+    static func interval(environmentValue: String?) throws -> TimeInterval {
+        guard let environmentValue else {
+            return OrchardConstants.commandWaitInterval
+        }
+        let value = environmentValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let interval = TimeInterval(value), interval.isFinite, interval > 0 else {
+            throw OrchardProtocolError.invalidCommand(
+                "ORCHARD_COMMAND_WAIT_TIMEOUT must be a finite number greater than zero"
+            )
+        }
+        return interval
     }
 }
 
@@ -453,6 +473,30 @@ nonisolated enum OrchardCommandQueue {
         try entries(in: paths.commandProcessing)
     }
 
+    static func claimLegacyCommand(paths: OrchardPaths = .current) throws -> Bool {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: paths.legacyCommand.path) else {
+            return false
+        }
+        try fileManager.createDirectory(
+            at: paths.commandProcessing,
+            withIntermediateDirectories: true
+        )
+        guard !fileManager.fileExists(atPath: paths.legacyProcessingCommand.path) else {
+            return false
+        }
+        do {
+            try fileManager.moveItem(
+                at: paths.legacyCommand,
+                to: paths.legacyProcessingCommand
+            )
+            return true
+        } catch let error as CocoaError
+            where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {
+            return false
+        }
+    }
+
     static func claim(
         _ entry: PendingEntry,
         paths: OrchardPaths = .current
@@ -516,8 +560,52 @@ nonisolated enum OrchardCommandQueue {
         completionURL: URL,
         paths: OrchardPaths = .current
     ) throws {
+        try pruneCommandResults(paths: paths)
         try OrchardJSON.save(result, to: paths.resultURL(for: result.commandID))
         try FileManager.default.removeItem(at: completionURL)
+    }
+
+    static func pruneCommandResults(
+        paths: OrchardPaths = .current,
+        now: Date = Date()
+    ) throws {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: paths.commandResults.path) else {
+            return
+        }
+        let urls = try fileManager.contentsOfDirectory(
+            at: paths.commandResults,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ).filter { $0.pathExtension == "json" }
+        var retained: [(url: URL, modifiedAt: Date)] = []
+        for url in urls {
+            do {
+                let modifiedAt = try url.resourceValues(
+                    forKeys: [.contentModificationDateKey]
+                ).contentModificationDate ?? .distantPast
+                if now.timeIntervalSince(modifiedAt)
+                    > OrchardConstants.commandResultRetentionInterval {
+                    try removeResultIfPresent(at: url)
+                } else {
+                    retained.append((url, modifiedAt))
+                }
+            } catch let error as CocoaError
+                where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {
+                continue
+            }
+        }
+
+        retained.sort {
+            if $0.modifiedAt == $1.modifiedAt {
+                return $0.url.lastPathComponent < $1.url.lastPathComponent
+            }
+            return $0.modifiedAt < $1.modifiedAt
+        }
+        let maximumBeforePublication = OrchardConstants.maximumRetainedCommandResults - 1
+        for entry in retained.prefix(max(0, retained.count - maximumBeforePublication)) {
+            try removeResultIfPresent(at: entry.url)
+        }
     }
 
     static func ordered(_ entries: [PendingEntry]) -> [PendingEntry] {
@@ -557,6 +645,15 @@ nonisolated enum OrchardCommandQueue {
             }
         }
         return ordered(entries)
+    }
+
+    private static func removeResultIfPresent(at url: URL) throws {
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch let error as CocoaError
+            where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {
+            return
+        }
     }
 }
 

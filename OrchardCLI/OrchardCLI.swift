@@ -368,11 +368,12 @@ private enum OrchardOperations {
 
     static func enqueue(_ command: OrchardCommand) throws {
         let paths = OrchardPaths.current
+        let waitInterval = try OrchardCommandWaitPolicy.interval(
+            environmentValue: ProcessInfo.processInfo.environment[
+                "ORCHARD_COMMAND_WAIT_TIMEOUT"
+            ]
+        )
         try OrchardCommandQueue.enqueue(command, paths: paths)
-        let waitInterval = ProcessInfo.processInfo.environment[
-            "ORCHARD_COMMAND_WAIT_TIMEOUT"
-        ].flatMap(TimeInterval.init) ?? OrchardConstants.commandWaitInterval
-        guard waitInterval > 0 else { return }
 
         let deadline = Date().addingTimeInterval(waitInterval)
         let resultURL = paths.resultURL(for: command.id)
