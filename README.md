@@ -12,8 +12,9 @@ focusing windows across applications.
 - Persist labels in `~/Library/Application Support/Orchard/`.
 
 Orchard identifies a window from its application bundle ID and native title.
-That keeps labels across relaunches, but apps that frequently rewrite their
-window titles may receive a new identity.
+Already-tracked Accessibility windows keep their runtime identity when the
+native title changes. Across Orchard relaunches, apps that frequently rewrite
+window titles may still receive a new identity.
 
 ## Privacy
 
@@ -39,12 +40,15 @@ Open `Orchard.xcodeproj`, select the **Orchard** scheme and run it on **My Mac**
 On first launch, use Orchard's menu to open System Settings and grant
 Accessibility access.
 
-The `OrchardCLI` target builds an executable named `orchard`. To make it
-available in your shell after building:
+The `OrchardCLI` target builds an executable named `orchard`. Its `skill
+install` command reads the versioned skill resource from the sibling app build.
+To make both available after building:
 
 ```sh
 mkdir -p ~/.local/bin
 cp ~/Library/Developer/Xcode/DerivedData/Orchard-*/Build/Products/Debug/orchard ~/.local/bin/
+ditto ~/Library/Developer/Xcode/DerivedData/Orchard-*/Build/Products/Debug/Orchard.app \
+  ~/Applications/Orchard.app
 ```
 
 Ensure `~/.local/bin` is on your `PATH`.
@@ -70,19 +74,77 @@ tap's `Casks/orchard.rb`.
 
 ```text
 orchard list
+orchard tag --current --title "Agent worktree tagging"
 orchard label <window-id> "API debugging"
 orchard color <window-id> purple
 orchard focus <window-id>
 orchard clear <window-id>
+orchard skill install
 ```
 
-The menu bar app must be running for window discovery and focus requests.
+`tag --current` is the provider-neutral agent entry point:
+
+```text
+orchard tag --current --title <exact-title>
+            [--color auto|red|orange|yellow|green|blue|purple|pink]
+            [--provider <name>] [--session <opaque-id>]
+            [--worktree <path>]
+```
+
+The supplied title is displayed exactly, without an Orchard or provider
+suffix. `--color` defaults to `auto`. When both provider and session are known,
+Orchard deterministically hashes their normalized identity; otherwise it uses
+the canonical Git worktree root, falling back to the current directory. The
+selected concrete palette color is persisted.
+
+The menu bar app must be running. Current-window tagging reads a fresh Orchard
+snapshot and fails rather than guessing when the snapshot is stale, no focused
+window exists, or the focused ID is inconsistent. Existing `label`, `color`,
+`focus`, and `clear` syntax remains supported. All mutations use Orchard's
+serialized command queue, and the app is the sole writer of labels.
+
+## Agent skill
+
+Install Orchard's bundled, portable Agent Skills document:
+
+```text
+orchard skill install [--agent copilot|claude|codex|all]
+                      [--scope personal|project] [--force]
+```
+
+The defaults are all three agents and personal scope. Personal installs go to
+`~/.copilot/skills/orchard-window-tag`, `~/.claude/skills/orchard-window-tag`,
+and `~/.agents/skills/orchard-window-tag`. Project installs use the equivalent
+`.github/skills`, `.claude/skills`, and `.agents/skills` directories at the Git
+root. Installation preflights every selected destination, is an identical-file
+no-op, and refuses differing content unless `--force` is supplied.
+
+The skill is maintained as the versioned
+`OrchardWindowTagSkill.bundle` resource inside `Orchard.app`; it is not embedded
+in Swift source. `orchard skill install` reports the bundled skill version it
+installs. Releases also place the resource bundle beside the CLI so skill
+installation works before the app is moved to `/Applications`.
+
+The skill asks Copilot, Claude, or Codex to obtain or set its session title
+first and pass that exact title to Orchard. For example:
+
+```sh
+orchard tag --current --title "Agent worktree tagging" --provider copilot --session "$KNOWN_SESSION_ID"
+orchard tag --current --title "Fix release signing" --provider claude --session "$KNOWN_SESSION_ID"
+orchard tag --current --title "Improve queue tests" --provider codex --session "$KNOWN_SESSION_ID"
+```
+
+Provider and session arguments should be included only when the environment
+exposes real values. Skill activation is agent-driven and therefore best
+effort; explicitly invoke the skill when execution must be guaranteed. Re-run
+the idempotent tag command if the provider session title changes.
 
 ## Extending Orchard
 
-The first release deliberately uses only public APIs and a small JSON contract
-between the app and CLI. Future adapters can enrich window metadata from tools
-such as Xcode and VS Code without coupling the core window manager to them.
+Orchard deliberately uses only public APIs and a small, provider-neutral JSON
+contract shared by the app and CLI. The optional agent metadata is open-ended,
+so future tools can integrate without provider SDKs, lifecycle hooks, private
+session stores, or changes to the core window manager.
 
 ## License
 

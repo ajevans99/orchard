@@ -66,6 +66,19 @@ final class OrchardController: ObservableObject {
         let windowNumber: CGWindowID?
     }
 
+    private struct HandledCommand {
+        let url: URL
+        let command: OrchardCommand
+        var result: OrchardCommandResult
+        let mutatesLabels: Bool
+    }
+
+    private struct ProcessedCommandBatch {
+        let handled: [HandledCommand]
+        let labelsChanged: Bool
+        let focusedWindowID: String?
+    }
+
     private var trackedWindows: [String: TrackedWindow] = [:]
     private var labels: [String: WindowLabel] = [:]
     private var discoveryTimer: Timer?
@@ -123,7 +136,10 @@ final class OrchardController: ObservableObject {
         loadLabels()
         refresh()
 
-        let discoveryTimer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+        let discoveryTimer = Timer(
+            timeInterval: OrchardConstants.discoveryRefreshInterval,
+            repeats: true
+        ) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.refresh()
             }
@@ -195,6 +211,7 @@ final class OrchardController: ObservableObject {
             stopDisplayLink()
             stopAccessibilityObserver()
             outlineController.hide()
+            persistSnapshot()
             if manual {
                 trackRefresh()
             }
@@ -203,19 +220,23 @@ final class OrchardController: ObservableObject {
 
         let tracked = discoverWindows()
         trackedWindows = Dictionary(uniqueKeysWithValues: tracked.map { ($0.record.id, $0) })
-        windows = tracked.map(\.record).sorted {
-            if $0.appName == $1.appName {
-                return $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle) == .orderedAscending
-            }
-            return $0.appName.localizedCaseInsensitiveCompare($1.appName) == .orderedAscending
+        windows = sortedRecords(tracked.map(\.record))
+        let processedCommands = processPendingCommands()
+        if processedCommands?.labelsChanged == true {
+            applyLabelsToTrackedWindows()
         }
-
-        try? OrchardFiles.save(
-            WindowSnapshot(updatedAt: Date(), windows: windows),
-            to: OrchardFiles.snapshot
+        if let focusedWindowID = processedCommands?.focusedWindowID {
+            setActiveWindow(focusedWindowID)
+        }
+        updateOutline(
+            preferredActiveWindowID: processedCommands?.focusedWindowID
         )
-        processPendingCommand()
-        updateOutline()
+        let snapshot = currentSnapshot()
+        if let processedCommands, !processedCommands.handled.isEmpty {
+            complete(processedCommands.handled, observableSnapshot: snapshot)
+        } else {
+            persistSnapshot(snapshot)
+        }
         if manual {
             trackRefresh()
         }
@@ -252,29 +273,22 @@ final class OrchardController: ObservableObject {
     }
 
     func focus(_ windowID: String, source: OrchardFocusSource = .menuBar) {
-        guard let tracked = trackedWindows[windowID] else {
-            OrchardTelemetry.track(.windowFocused(source: source, succeeded: false))
-            return
-        }
-        let didActivate = NSRunningApplication(
-            processIdentifier: tracked.processIdentifier
-        )?.activate() ?? false
-        let raiseResult = AXUIElementPerformAction(
-            tracked.element,
-            kAXRaiseAction as CFString
-        )
-        OrchardTelemetry.track(
-            .windowFocused(
-                source: source,
-                succeeded: didActivate && raiseResult == .success
+        do {
+            try focusWindow(windowID, source: source)
+        } catch {
+            logger.error(
+                "Unable to focus window \(windowID, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
-        )
+        }
     }
 
     private func discoverWindows() -> [TrackedWindow] {
         var discovered: [TrackedWindow] = []
         var occurrences: [String: Int] = [:]
         var windowServerWindows = copyWindowServerWindows()
+        let previousTrackedWindows = Array(trackedWindows.values)
+        let reservedWindowIDs = Set(previousTrackedWindows.map(\.record.id))
+        var reusedWindowIDs = Set<String>()
 
         for application in NSWorkspace.shared.runningApplications {
             guard
@@ -297,11 +311,33 @@ final class OrchardController: ObservableObject {
                 let occurrenceKey = "\(bundleIdentifier)\u{0}\(normalizedTitle)"
                 let occurrence = occurrences[occurrenceKey, default: 0]
                 occurrences[occurrenceKey] = occurrence + 1
-                let id = WindowIdentifier.make(
-                    bundleIdentifier: bundleIdentifier,
-                    nativeTitle: normalizedTitle,
-                    occurrence: occurrence
-                )
+                let existingID = previousTrackedWindows.first {
+                    $0.processIdentifier == application.processIdentifier
+                        && !reusedWindowIDs.contains($0.record.id)
+                        && CFEqual($0.element, element)
+                }?.record.id
+                let id: String
+                if let existingID {
+                    id = existingID
+                } else {
+                    var candidate = WindowIdentifier.make(
+                        bundleIdentifier: bundleIdentifier,
+                        nativeTitle: normalizedTitle,
+                        occurrence: occurrence
+                    )
+                    var fallbackOccurrence = occurrence
+                    while reusedWindowIDs.contains(candidate)
+                        || reservedWindowIDs.contains(candidate) {
+                        fallbackOccurrence += 1
+                        candidate = WindowIdentifier.make(
+                            bundleIdentifier: bundleIdentifier,
+                            nativeTitle: normalizedTitle,
+                            occurrence: fallbackOccurrence
+                        )
+                    }
+                    id = candidate
+                }
+                reusedWindowIDs.insert(id)
                 let label = labels[id]
                 let record = WindowRecord(
                     id: id,
@@ -309,7 +345,8 @@ final class OrchardController: ObservableObject {
                     bundleIdentifier: bundleIdentifier,
                     nativeTitle: normalizedTitle,
                     customTitle: label?.title,
-                    color: label?.color
+                    color: label?.color,
+                    agent: label?.agent
                 )
 
                 guard let frame = copyFrame(from: element), frame.width > 40, frame.height > 40 else {
@@ -340,7 +377,19 @@ final class OrchardController: ObservableObject {
         return discovered
     }
 
-    private func updateOutline() {
+    private func updateOutline(preferredActiveWindowID: String? = nil) {
+        if let preferredActiveWindowID,
+           let tracked = trackedWindows[preferredActiveWindowID] {
+            lastFocusedElement = tracked.element
+            observeWindow(
+                tracked.element,
+                processIdentifier: tracked.processIdentifier
+            )
+            setActiveWindow(preferredActiveWindowID)
+            updateOutline(for: tracked)
+            return
+        }
+
         guard isAccessibilityTrusted,
               let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         else {
@@ -379,12 +428,7 @@ final class OrchardController: ObservableObject {
         if tracked == nil && focusedWindowChanged {
             let discovered = discoverWindows()
             trackedWindows = Dictionary(uniqueKeysWithValues: discovered.map { ($0.record.id, $0) })
-            windows = discovered.map(\.record).sorted {
-                if $0.appName == $1.appName {
-                    return $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle) == .orderedAscending
-                }
-                return $0.appName.localizedCaseInsensitiveCompare($1.appName) == .orderedAscending
-            }
+            windows = sortedRecords(discovered.map(\.record))
             tracked = trackedWindows.values.first {
                 $0.processIdentifier == frontmostPID && CFEqual($0.element, focusedElement)
             }
@@ -392,11 +436,19 @@ final class OrchardController: ObservableObject {
 
         setActiveWindow(tracked?.record.id)
 
-        guard
-            let tracked,
-            let label = labels[tracked.record.id],
-            let currentFrame = currentFrame(for: tracked)
-        else {
+        guard let tracked else {
+            activeTrackedWindow = nil
+            stopDisplayLink()
+            outlineController.hide()
+            return
+        }
+
+        updateOutline(for: tracked)
+    }
+
+    private func updateOutline(for tracked: TrackedWindow) {
+        guard let label = labels[tracked.record.id],
+              let currentFrame = currentFrame(for: tracked) else {
             activeTrackedWindow = nil
             stopDisplayLink()
             outlineController.hide()
@@ -416,6 +468,7 @@ final class OrchardController: ObservableObject {
     private func setActiveWindow(_ windowID: String?) {
         guard activeWindowID != windowID else { return }
         activeWindowID = windowID
+        persistSnapshot()
     }
 
     fileprivate func handleAccessibilityNotification() {
@@ -612,17 +665,252 @@ final class OrchardController: ObservableObject {
         observedWindow = nil
     }
 
-    private func processPendingCommand() {
-        guard
-            let command = try? OrchardFiles.load(OrchardCommand.self, from: OrchardFiles.command)
-        else {
-            return
+    private func processPendingCommands() -> ProcessedCommandBatch? {
+        let paths = OrchardPaths.current
+        migrateLegacyCommand(paths: paths)
+        let pendingEntries: [OrchardCommandQueue.PendingEntry]
+        do {
+            pendingEntries = try OrchardCommandQueue.pendingEntries(paths: paths)
+        } catch {
+            logger.error("Unable to read command queue: \(error.localizedDescription, privacy: .public)")
+            return nil
         }
-        try? FileManager.default.removeItem(at: OrchardFiles.command)
+        let recoveredEntries: [OrchardCommandQueue.PendingEntry]
+        do {
+            recoveredEntries = try OrchardCommandQueue.processingEntries(paths: paths)
+        } catch {
+            logger.error(
+                "Unable to read claimed commands: \(error.localizedDescription, privacy: .public)"
+            )
+            return nil
+        }
+        var claimedEntries: [OrchardCommandQueue.PendingEntry] = []
+        for entry in pendingEntries {
+            do {
+                if let claimed = try OrchardCommandQueue.claim(entry, paths: paths) {
+                    claimedEntries.append(claimed)
+                }
+            } catch {
+                logger.error(
+                    "Unable to claim command \(entry.url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+        let entries = OrchardCommandQueue.ordered(recoveredEntries + claimedEntries)
+        guard !entries.isEmpty else { return nil }
 
-        switch command.action {
-        case .focus:
-            focus(command.windowID, source: .commandLine)
+        let originalLabels = labels
+        let validWindowIDs = Set(trackedWindows.keys)
+        var handled: [HandledCommand] = []
+        var labelsChanged = false
+        var focusedWindowID: String?
+
+        for entry in entries {
+            switch entry {
+            case .completed(let url, let result):
+                do {
+                    try OrchardCommandQueue.publishCompleted(
+                        result,
+                        completionURL: url,
+                        paths: paths
+                    )
+                } catch {
+                    logger.error(
+                        "Unable to publish completed command \(result.commandID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+            case .malformed(let url, let message):
+                logger.error(
+                    "Discarding malformed queued command \(url.lastPathComponent, privacy: .public): \(message, privacy: .public)"
+                )
+                do {
+                    try FileManager.default.removeItem(at: url)
+                } catch {
+                    logger.error(
+                        "Unable to remove malformed command \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+            case .command(let url, let command):
+                do {
+                    try command.validateFreshness(now: Date())
+                    let application = try OrchardCommandApplier.apply(
+                        command,
+                        validWindowIDs: validWindowIDs,
+                        labels: &labels
+                    )
+                    labelsChanged = labelsChanged || application.labelsChanged
+                    if let focusWindowID = application.focusWindowID {
+                        try focusWindow(focusWindowID, source: .commandLine)
+                        focusedWindowID = focusWindowID
+                    }
+                    handled.append(
+                        HandledCommand(
+                            url: url,
+                            command: command,
+                            result: OrchardCommandResult(
+                                commandID: command.id,
+                                succeeded: true,
+                                message: "Command applied.",
+                                processedAt: Date()
+                            ),
+                            mutatesLabels: command.action != .focus
+                        )
+                    )
+                } catch {
+                    handled.append(
+                        HandledCommand(
+                            url: url,
+                            command: command,
+                            result: OrchardCommandResult(
+                                commandID: command.id,
+                                succeeded: false,
+                                message: error.localizedDescription,
+                                processedAt: Date()
+                            ),
+                            mutatesLabels: false
+                        )
+                    )
+                    logger.error(
+                        "Rejected command \(command.id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+            }
+        }
+
+        if labelsChanged {
+            do {
+                try OrchardJSON.save(labels, to: paths.labels)
+            } catch {
+                labels = originalLabels
+                labelsChanged = false
+                logger.error(
+                    "Unable to persist queued label changes: \(error.localizedDescription, privacy: .public)"
+                )
+                for index in handled.indices where handled[index].mutatesLabels {
+                    handled[index].result = OrchardCommandResult(
+                        commandID: handled[index].command.id,
+                        succeeded: false,
+                        message: "Unable to persist labels: \(error.localizedDescription)",
+                        processedAt: Date()
+                    )
+                }
+            }
+        }
+
+        return ProcessedCommandBatch(
+            handled: handled,
+            labelsChanged: labelsChanged,
+            focusedWindowID: focusedWindowID
+        )
+    }
+
+    private func complete(
+        _ handled: [HandledCommand],
+        observableSnapshot: WindowSnapshot
+    ) {
+        for item in handled {
+            do {
+                try OrchardCommandQueue.complete(
+                    item.result,
+                    commandURL: item.url,
+                    observableSnapshot: observableSnapshot
+                )
+            } catch {
+                logger.error(
+                    "Unable to finish command \(item.command.id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+                return
+            }
+        }
+    }
+
+    private func focusWindow(_ windowID: String, source: OrchardFocusSource) throws {
+        guard let tracked = trackedWindows[windowID] else {
+            OrchardTelemetry.track(.windowFocused(source: source, succeeded: false))
+            throw OrchardProtocolError.unknownWindow(windowID)
+        }
+        guard let application = NSRunningApplication(
+            processIdentifier: tracked.processIdentifier
+        ), application.activate() else {
+            OrchardTelemetry.track(.windowFocused(source: source, succeeded: false))
+            throw OrchardProtocolError.invalidCommand(
+                "unable to activate the target application"
+            )
+        }
+        let raiseError = AXUIElementPerformAction(
+            tracked.element,
+            kAXRaiseAction as CFString
+        )
+        guard raiseError == .success else {
+            OrchardTelemetry.track(.windowFocused(source: source, succeeded: false))
+            throw OrchardProtocolError.invalidCommand(
+                "unable to raise the target window (AX error \(raiseError.rawValue))"
+            )
+        }
+        OrchardTelemetry.track(.windowFocused(source: source, succeeded: true))
+    }
+
+    private func migrateLegacyCommand(paths: OrchardPaths) {
+        do {
+            _ = try OrchardCommandQueue.claimLegacyCommand(paths: paths)
+        } catch {
+            logger.error(
+                "Unable to claim legacy command: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    private func applyLabelsToTrackedWindows() {
+        trackedWindows = trackedWindows.mapValues { tracked in
+            let label = labels[tracked.record.id]
+            return TrackedWindow(
+                record: WindowRecord(
+                    id: tracked.record.id,
+                    appName: tracked.record.appName,
+                    bundleIdentifier: tracked.record.bundleIdentifier,
+                    nativeTitle: tracked.record.nativeTitle,
+                    customTitle: label?.title,
+                    color: label?.color,
+                    agent: label?.agent
+                ),
+                processIdentifier: tracked.processIdentifier,
+                element: tracked.element,
+                frame: tracked.frame,
+                windowNumber: tracked.windowNumber
+            )
+        }
+        windows = sortedRecords(trackedWindows.values.map(\.record))
+    }
+
+    private func sortedRecords(_ records: [WindowRecord]) -> [WindowRecord] {
+        records.sorted {
+            if $0.appName == $1.appName {
+                return $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle)
+                    == .orderedAscending
+            }
+            return $0.appName.localizedCaseInsensitiveCompare($1.appName)
+                == .orderedAscending
+        }
+    }
+
+    private func currentSnapshot() -> WindowSnapshot {
+        WindowSnapshot(
+            updatedAt: Date(),
+            windows: windows,
+            activeWindowID: activeWindowID
+        )
+    }
+
+    private func persistSnapshot(_ snapshot: WindowSnapshot? = nil) {
+        do {
+            try OrchardJSON.save(
+                snapshot ?? currentSnapshot(),
+                to: OrchardPaths.current.snapshot
+            )
+        } catch {
+            logger.error(
+                "Unable to persist window snapshot: \(error.localizedDescription, privacy: .public)"
+            )
         }
     }
 
@@ -639,11 +927,29 @@ final class OrchardController: ObservableObject {
     }
 
     private func loadLabels() {
-        labels = (try? OrchardFiles.load([String: WindowLabel].self, from: OrchardFiles.labels)) ?? [:]
+        let url = OrchardPaths.current.labels
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            labels = [:]
+            return
+        }
+        do {
+            labels = try OrchardJSON.load([String: WindowLabel].self, from: url)
+        } catch {
+            labels = [:]
+            logger.error(
+                "Unable to load labels: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     private func saveLabels() {
-        try? OrchardFiles.save(labels, to: OrchardFiles.labels)
+        do {
+            try OrchardJSON.save(labels, to: OrchardPaths.current.labels)
+        } catch {
+            logger.error(
+                "Unable to save labels: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     private func openAccessibilitySettings() {

@@ -102,6 +102,8 @@ jobs:
 
           APP_PATH="$DERIVED_DATA/Build/Products/Release/Orchard.app"
           CLI_PATH="$DERIVED_DATA/Build/Products/Release/orchard"
+          SKILL_BUNDLE_PATH="$APP_PATH/Contents/Resources/OrchardWindowTagSkill.bundle"
+          test -f "$SKILL_BUNDLE_PATH/Contents/Resources/SKILL.md"
           codesign \
             --force \
             --options runtime \
@@ -114,6 +116,7 @@ jobs:
 
           echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
           echo "CLI_PATH=$CLI_PATH" >> "$GITHUB_ENV"
+          echo "SKILL_BUNDLE_PATH=$SKILL_BUNDLE_PATH" >> "$GITHUB_ENV"
 
       - name: Notarize release
         shell: bash
@@ -133,6 +136,7 @@ jobs:
           mkdir -p "$STAGING_PATH"
           ditto "$APP_PATH" "$STAGING_PATH/Orchard.app"
           cp "$CLI_PATH" "$STAGING_PATH/orchard"
+          ditto "$SKILL_BUNDLE_PATH" "$STAGING_PATH/OrchardWindowTagSkill.bundle"
           chmod +x "$STAGING_PATH/orchard"
           printf '%s' "$APPLE_API_PRIVATE_KEY" > "$API_KEY_PATH"
 
