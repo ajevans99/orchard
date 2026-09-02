@@ -16,6 +16,13 @@ Already-tracked Accessibility windows keep their runtime identity when the
 native title changes. Across Orchard relaunches, apps that frequently rewrite
 window titles may still receive a new identity.
 
+## Privacy
+
+Orchard sends anonymous usage signals through
+[TelemetryDeck](https://telemetrydeck.com) for key actions and outcomes.
+Window titles, application names, bundle identifiers, and window IDs are never
+included in telemetry.
+
 ## Install
 
 Tagged releases contain a signed and notarized universal build of `Orchard.app`

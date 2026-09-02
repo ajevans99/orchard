@@ -4,7 +4,15 @@ import SwiftUI
 @main
 struct OrchardApp: App {
     @NSApplicationDelegateAdaptor(OrchardAppDelegate.self) private var appDelegate
-    @StateObject private var controller = OrchardController()
+    @StateObject private var controller: OrchardController
+
+    init() {
+        OrchardTelemetry.configure()
+        _controller = StateObject(wrappedValue: OrchardController())
+        OrchardTelemetry.track(
+            .appLaunched(accessibilityTrusted: AXIsProcessTrusted())
+        )
+    }
 
     var body: some Scene {
         MenuBarExtra {

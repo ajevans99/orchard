@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		189791B98B33558FFFC5A81E /* ArgumentParser in Frameworks */ = {isa = PBXBuildFile; productRef = 4848FE3E5B6081387283C954 /* ArgumentParser */; };
+		7A0000010000000000000001 /* TelemetryDeck in Frameworks */ = {isa = PBXBuildFile; productRef = 7A0000030000000000000003 /* TelemetryDeck */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -87,6 +88,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7A0000010000000000000001 /* TelemetryDeck in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -157,6 +159,7 @@
 			);
 			name = Orchard;
 			packageProductDependencies = (
+				7A0000030000000000000003 /* TelemetryDeck */,
 			);
 			productName = Orchard;
 			productReference = 2532487E304749A70046C0FA /* Orchard.app */;
@@ -268,6 +271,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				499813A0C86BB294AB0C85A0 /* XCRemoteSwiftPackageReference "swift-argument-parser" */,
+				7A0000020000000000000002 /* XCRemoteSwiftPackageReference "SwiftSDK" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 2532487F304749A70046C0FA /* Products */;
@@ -479,6 +483,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Orchard/Info.plist;
+				INFOPLIST_KEY_OrchardTelemetryAppID = "407EE4F7-8455-4494-B377-B4D241260AEE";
 				INFOPLIST_KEY_LSUIElement = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -525,6 +530,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Orchard/Info.plist;
+				INFOPLIST_KEY_OrchardTelemetryAppID = "407EE4F7-8455-4494-B377-B4D241260AEE";
 				INFOPLIST_KEY_LSUIElement = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -565,7 +571,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
-				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.orchardapp.OrchardTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -590,7 +596,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
-				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.orchardapp.OrchardTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -614,7 +620,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
-				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.orchardapp.OrchardUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -638,7 +644,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
-				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.orchardapp.OrchardUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -732,6 +738,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		7A0000020000000000000002 /* XCRemoteSwiftPackageReference "SwiftSDK" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/TelemetryDeck/SwiftSDK";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.14.2;
+			};
+		};
 		499813A0C86BB294AB0C85A0 /* XCRemoteSwiftPackageReference "swift-argument-parser" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/apple/swift-argument-parser.git";
@@ -743,6 +757,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		7A0000030000000000000003 /* TelemetryDeck */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7A0000020000000000000002 /* XCRemoteSwiftPackageReference "SwiftSDK" */;
+			productName = TelemetryDeck;
+		};
 		4848FE3E5B6081387283C954 /* ArgumentParser */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 499813A0C86BB294AB0C85A0 /* XCRemoteSwiftPackageReference "swift-argument-parser" */;

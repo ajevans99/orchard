@@ -64,6 +64,17 @@ struct ContentView: View {
         }
         .frame(width: 420)
         .accessibilityIdentifier("orchard-menu")
+        .onAppear {
+            OrchardTelemetry.track(
+                .menuPresented(
+                    windowCount: controller.windows.count,
+                    labeledWindowCount: controller.windows.filter {
+                        $0.customTitle != nil || $0.color != nil
+                    }.count,
+                    accessibilityTrusted: controller.isAccessibilityTrusted
+                )
+            )
+        }
     }
 
     private var header: some View {
@@ -99,7 +110,7 @@ struct ContentView: View {
     private var footer: some View {
         HStack {
             Button {
-                controller.refresh()
+                controller.refresh(manual: true)
             } label: {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
@@ -114,6 +125,8 @@ struct ContentView: View {
             Spacer()
 
             Button("Quit") {
+                OrchardTelemetry.track(.appQuit)
+                OrchardTelemetry.flush()
                 NSApplication.shared.terminate(nil)
             }
             .buttonStyle(.plain)

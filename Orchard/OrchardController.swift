@@ -186,13 +186,20 @@ final class OrchardController: ObservableObject {
     }
 
     func requestAccessibilityAccess() {
+        OrchardTelemetry.track(.accessibilitySettingsOpened)
         let options = ["AXTrustedCheckOptionPrompt": true]
         AXIsProcessTrustedWithOptions(options as CFDictionary)
         openAccessibilitySettings()
     }
 
-    func refresh() {
-        isAccessibilityTrusted = AXIsProcessTrusted()
+    func refresh(manual: Bool = false) {
+        let accessibilityTrusted = AXIsProcessTrusted()
+        if accessibilityTrusted != isAccessibilityTrusted {
+            OrchardTelemetry.track(
+                .accessibilityStatusChanged(isTrusted: accessibilityTrusted)
+            )
+        }
+        isAccessibilityTrusted = accessibilityTrusted
         loadLabels()
 
         guard isAccessibilityTrusted else {
@@ -205,6 +212,9 @@ final class OrchardController: ObservableObject {
             stopAccessibilityObserver()
             outlineController.hide()
             persistSnapshot()
+            if manual {
+                trackRefresh()
+            }
             return
         }
 
@@ -227,6 +237,9 @@ final class OrchardController: ObservableObject {
         } else {
             persistSnapshot(snapshot)
         }
+        if manual {
+            trackRefresh()
+        }
     }
 
     func rename(_ windowID: String, title: String) {
@@ -239,6 +252,7 @@ final class OrchardController: ObservableObject {
             labels[windowID] = label
         }
         saveLabels()
+        OrchardTelemetry.track(.windowTitleChanged(hasTitle: label.title != nil))
         refresh()
     }
 
@@ -247,18 +261,20 @@ final class OrchardController: ObservableObject {
         label.color = color
         labels[windowID] = label
         saveLabels()
+        OrchardTelemetry.track(.windowColorChanged(color: color))
         refresh()
     }
 
     func clear(_ windowID: String) {
         labels.removeValue(forKey: windowID)
         saveLabels()
+        OrchardTelemetry.track(.windowLabelCleared)
         refresh()
     }
 
-    func focus(_ windowID: String) {
+    func focus(_ windowID: String, source: OrchardFocusSource = .menuBar) {
         do {
-            try focusWindow(windowID)
+            try focusWindow(windowID, source: source)
         } catch {
             logger.error(
                 "Unable to focus window \(windowID, privacy: .public): \(error.localizedDescription, privacy: .public)"
@@ -724,7 +740,7 @@ final class OrchardController: ObservableObject {
                     )
                     labelsChanged = labelsChanged || application.labelsChanged
                     if let focusWindowID = application.focusWindowID {
-                        try focusWindow(focusWindowID)
+                        try focusWindow(focusWindowID, source: .commandLine)
                         focusedWindowID = focusWindowID
                     }
                     handled.append(
@@ -808,13 +824,15 @@ final class OrchardController: ObservableObject {
         }
     }
 
-    private func focusWindow(_ windowID: String) throws {
+    private func focusWindow(_ windowID: String, source: OrchardFocusSource) throws {
         guard let tracked = trackedWindows[windowID] else {
+            OrchardTelemetry.track(.windowFocused(source: source, succeeded: false))
             throw OrchardProtocolError.unknownWindow(windowID)
         }
         guard let application = NSRunningApplication(
             processIdentifier: tracked.processIdentifier
         ), application.activate() else {
+            OrchardTelemetry.track(.windowFocused(source: source, succeeded: false))
             throw OrchardProtocolError.invalidCommand(
                 "unable to activate the target application"
             )
@@ -824,10 +842,12 @@ final class OrchardController: ObservableObject {
             kAXRaiseAction as CFString
         )
         guard raiseError == .success else {
+            OrchardTelemetry.track(.windowFocused(source: source, succeeded: false))
             throw OrchardProtocolError.invalidCommand(
                 "unable to raise the target window (AX error \(raiseError.rawValue))"
             )
         }
+        OrchardTelemetry.track(.windowFocused(source: source, succeeded: true))
     }
 
     private func migrateLegacyCommand(paths: OrchardPaths) {
@@ -916,6 +936,18 @@ final class OrchardController: ObservableObject {
                 "Unable to persist window snapshot: \(error.localizedDescription, privacy: .public)"
             )
         }
+    }
+
+    private func trackRefresh() {
+        OrchardTelemetry.track(
+            .windowListRefreshed(
+                windowCount: windows.count,
+                labeledWindowCount: windows.filter {
+                    $0.customTitle != nil || $0.color != nil
+                }.count,
+                accessibilityTrusted: isAccessibilityTrusted
+            )
+        )
     }
 
     private func loadLabels() {
