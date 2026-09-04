@@ -25,10 +25,16 @@ included in telemetry.
 
 ## Install
 
-Tagged releases contain a signed and notarized universal build of `Orchard.app`
-and the `orchard` CLI. Download the latest archive from
-[GitHub Releases](https://github.com/ajevans99/orchard/releases), or install
-both through Homebrew:
+Download the latest DMG from
+[GitHub Releases](https://github.com/ajevans99/orchard/releases), open it, and
+drag `Orchard.app` to **Applications** before launching it. Orchard detects
+release builds launched from Downloads, a mounted disk image, or another
+unstable location and asks you to move the app before granting Accessibility.
+
+After moving the app, run **Install Orchard CLI.command** from the DMG to install
+`orchard` at `/usr/local/bin/orchard`. The installer verifies the app and its
+agent skill resource are installed first. Alternatively, Homebrew installs both
+the app and CLI:
 
 ```sh
 brew install --cask ajevans99/tap/orchard
@@ -64,14 +70,16 @@ Releases are published from the
 4. Publish the release.
 
 Publishing starts the release workflow at that tag. It builds universal app and
-CLI binaries, signs and notarizes them, staples the app, and uploads
-`Orchard-<tag>-macOS.zip` to the existing GitHub release. Stable releases also
-update `Casks/orchard.rb` in `ajevans99/homebrew-tap`; prereleases never update
+CLI binaries, signs and notarizes them, and uploads both
+`Orchard-<tag>-macOS.dmg` and `Orchard-<tag>-macOS.zip` to the existing GitHub
+release. The ZIP remains the Homebrew source artifact. Stable releases update
+`Casks/orchard.rb` in `ajevans99/homebrew-tap`; prereleases never update
 Homebrew.
 
 To test the build without creating a GitHub release, open **Actions → Release → Run
-workflow**. Manual runs upload their ZIP to the workflow run instead. Notarization
-is enabled by default and can be disabled for a faster build-only check.
+workflow**. Manual runs upload both artifacts to the workflow run instead.
+Notarization is enabled by default and can be disabled for a faster build-only
+check.
 
 ## CLI
 
@@ -123,10 +131,11 @@ root. Installation preflights every selected destination, is an identical-file
 no-op, and refuses differing content unless `--force` is supplied.
 
 The skill is maintained as the versioned
-`OrchardWindowTagSkill.bundle` resource inside `Orchard.app`; it is not embedded
-in Swift source. `orchard skill install` reports the bundled skill version it
-installs. Releases also place the resource bundle beside the CLI so skill
-installation works before the app is moved to `/Applications`.
+`OrchardWindowTagSkill.bundle` resource inside `Orchard.app`; it is not another
+application or extension the user opens. The bundle packages the portable
+`SKILL.md` and its version metadata for `orchard skill install`. Release command
+line tools include a second copy beside the CLI so the command can also run
+before Orchard is installed in Applications.
 
 The skill asks Copilot, Claude, or Codex to obtain or set its session title
 first and pass that exact title to Orchard. For example:

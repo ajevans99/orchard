@@ -46,14 +46,17 @@ jobs:
               exit 1
             fi
             VERSION="${RELEASE_TAG#v}"
-            ARTIFACT_NAME="Orchard-$RELEASE_TAG-macOS.zip"
+            ZIP_NAME="Orchard-$RELEASE_TAG-macOS.zip"
+            DMG_NAME="Orchard-$RELEASE_TAG-macOS.dmg"
           else
             VERSION="manual-$GITHUB_RUN_NUMBER"
-            ARTIFACT_NAME="Orchard-$VERSION-macOS.zip"
+            ZIP_NAME="Orchard-$VERSION-macOS.zip"
+            DMG_NAME="Orchard-$VERSION-macOS.dmg"
           fi
 
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> "$GITHUB_ENV"
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+          echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
 
       - name: Import Developer ID certificate
@@ -168,7 +171,8 @@ jobs:
 
           STAGING_PATH="$RUNNER_TEMP/Orchard-$VERSION"
           NOTARIZATION_ARCHIVE="$RUNNER_TEMP/Orchard-notarization.zip"
-          RELEASE_ARCHIVE="$RUNNER_TEMP/$ARTIFACT_NAME"
+          RELEASE_ARCHIVE="$RUNNER_TEMP/$ZIP_NAME"
+          RELEASE_DMG="$RUNNER_TEMP/$DMG_NAME"
 
           mkdir -p "$STAGING_PATH"
           ditto "$APP_PATH" "$STAGING_PATH/Orchard.app"
@@ -181,6 +185,7 @@ jobs:
           echo "STAGING_PATH=$STAGING_PATH" >> "$GITHUB_ENV"
           echo "NOTARIZATION_ARCHIVE=$NOTARIZATION_ARCHIVE" >> "$GITHUB_ENV"
           echo "RELEASE_ARCHIVE=$RELEASE_ARCHIVE" >> "$GITHUB_ENV"
+          echo "RELEASE_DMG=$RELEASE_DMG" >> "$GITHUB_ENV"
 
       - name: Notarize release
         if: ${{ github.event_name == 'release' || inputs.notarize }}
@@ -238,6 +243,76 @@ jobs:
           echo "RELEASE_SHA256=$(shasum -a 256 "$RELEASE_ARCHIVE" | awk '{ print $1 }')" \
             >> "$GITHUB_ENV"
 
+      - name: Create installer DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DMG_ROOT="$RUNNER_TEMP/Orchard-dmg"
+          rm -rf "$DMG_ROOT" "$RELEASE_DMG"
+          mkdir -p "$DMG_ROOT/Command Line Tools"
+
+          ditto "$STAGING_PATH/Orchard.app" "$DMG_ROOT/Orchard.app"
+          ln -s /Applications "$DMG_ROOT/Applications"
+          cp "$STAGING_PATH/orchard" "$DMG_ROOT/Command Line Tools/orchard"
+          ditto \
+            "$STAGING_PATH/OrchardWindowTagSkill.bundle" \
+            "$DMG_ROOT/Command Line Tools/OrchardWindowTagSkill.bundle"
+          cp \
+            "Distribution/Install Orchard CLI.command" \
+            "$DMG_ROOT/Install Orchard CLI.command"
+          chmod +x \
+            "$DMG_ROOT/Command Line Tools/orchard" \
+            "$DMG_ROOT/Install Orchard CLI.command"
+
+          hdiutil create \
+            -volname "Orchard $VERSION" \
+            -srcfolder "$DMG_ROOT" \
+            -ov \
+            -format UDZO \
+            "$RELEASE_DMG"
+
+      - name: Notarize installer DMG
+        if: ${{ github.event_name == 'release' || inputs.notarize }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          API_KEY_PATH="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY_ID.p8"
+          NOTARY_RESULT_PATH="$RUNNER_TEMP/notarytool-dmg.json"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$API_KEY_PATH"
+
+          xcrun notarytool submit "$RELEASE_DMG" \
+            --key "$API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER_ID" \
+            --wait \
+            --output-format json | tee "$NOTARY_RESULT_PATH"
+
+          SUBMISSION_ID="$(
+            python3 -c \
+              'import json, sys; print(json.load(open(sys.argv[1])).get("id", ""))' \
+              "$NOTARY_RESULT_PATH"
+          )"
+          NOTARY_STATUS="$(
+            python3 -c \
+              'import json, sys; print(json.load(open(sys.argv[1])).get("status", ""))' \
+              "$NOTARY_RESULT_PATH"
+          )"
+          if [[ "$NOTARY_STATUS" != "Accepted" ]]; then
+            if [[ -n "$SUBMISSION_ID" ]]; then
+              xcrun notarytool log "$SUBMISSION_ID" \
+                --key "$API_KEY_PATH" \
+                --key-id "$APPLE_API_KEY_ID" \
+                --issuer "$APPLE_API_ISSUER_ID" || true
+            fi
+            echo "DMG notarization failed with status: ${NOTARY_STATUS:-unknown}" >&2
+            exit 1
+          fi
+
+          xcrun stapler staple "$RELEASE_DMG"
+          xcrun stapler validate "$RELEASE_DMG"
+
       - name: Upload GitHub release asset
         if: ${{ github.event_name == 'release' }}
         env:
@@ -248,6 +323,7 @@ jobs:
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
           gh release upload "$RELEASE_TAG" \
             "$RELEASE_ARCHIVE" \
+            "$RELEASE_DMG" \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 
@@ -256,7 +332,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: Orchard-manual-${{ github.run_number }}
-          path: ${{ runner.temp }}/Orchard-manual-${{ github.run_number }}-macOS.zip
+          path: |
+            ${{ runner.temp }}/Orchard-manual-${{ github.run_number }}-macOS.zip
+            ${{ runner.temp }}/Orchard-manual-${{ github.run_number }}-macOS.dmg
           if-no-files-found: error
 
       - name: Check out Homebrew tap

@@ -3,6 +3,43 @@ import Testing
 @testable import Orchard
 
 struct OrchardTests {
+    @Test func installationLocationRequiresAnApplicationsDirectory() {
+        let home = URL(fileURLWithPath: "/Users/example", isDirectory: true)
+
+        #expect(
+            !OrchardInstallation.requiresMoveToApplications(
+                bundleURL: URL(fileURLWithPath: "/Applications/Orchard.app"),
+                homeDirectory: home
+            )
+        )
+        #expect(
+            !OrchardInstallation.requiresMoveToApplications(
+                bundleURL: URL(fileURLWithPath: "/Users/example/Applications/Orchard.app"),
+                homeDirectory: home
+            )
+        )
+        #expect(
+            OrchardInstallation.requiresMoveToApplications(
+                bundleURL: URL(fileURLWithPath: "/Users/example/Downloads/Orchard.app"),
+                homeDirectory: home
+            )
+        )
+        #expect(
+            OrchardInstallation.requiresMoveToApplications(
+                bundleURL: URL(
+                    fileURLWithPath: "/private/var/folders/AppTranslocation/d/Orchard.app"
+                ),
+                homeDirectory: home
+            )
+        )
+        #expect(
+            OrchardInstallation.requiresMoveToApplications(
+                bundleURL: URL(fileURLWithPath: "/Applications Backup/Orchard.app"),
+                homeDirectory: home
+            )
+        )
+    }
+
     @Test @MainActor func windowIdentifiersAreStableAndDistinct() {
         let first = WindowIdentifier.make(
             bundleIdentifier: "com.apple.dt.Xcode",
