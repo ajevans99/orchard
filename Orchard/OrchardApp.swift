@@ -18,7 +18,9 @@ struct OrchardApp: App {
         MenuBarExtra {
             ContentView(controller: controller)
         } label: {
-            Image(systemName: "square.dashed.inset.filled")
+            Image("MenuBarIcon")
+                .renderingMode(.template)
+                .accessibilityLabel("Orchard")
         }
         .menuBarExtraStyle(.window)
     }

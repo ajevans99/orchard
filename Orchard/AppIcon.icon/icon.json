@@ -6,33 +6,13 @@
     {
       "layers" : [
         {
-          "image-name" : "window-front.svg",
-          "name" : "window-front"
+          "image-name" : "orchard.png",
+          "name" : "orchard"
         }
       ],
       "shadow" : {
         "kind" : "neutral",
-        "opacity" : 0.42
-      },
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.35
-      }
-    },
-    {
-      "layers" : [
-        {
-          "image-name" : "window-glow.svg",
-          "name" : "window-glow"
-        }
-      ],
-      "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.12
-      },
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.55
+        "opacity" : 0.28
       }
     }
   ],
