@@ -136,6 +136,13 @@ jobs:
           test -f "$SKILL_BUNDLE_PATH/Contents/Resources/SKILL.md"
           codesign \
             --force \
+            --deep \
+            --options runtime \
+            --timestamp \
+            --sign "$SIGNING_IDENTITY" \
+            "$APP_PATH"
+          codesign \
+            --force \
             --options runtime \
             --timestamp \
             --sign "$SIGNING_IDENTITY" \
@@ -143,6 +150,12 @@ jobs:
 
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
           codesign --verify --strict --verbose=2 "$CLI_PATH"
+          if codesign -d --entitlements :- "$APP_PATH" 2>/dev/null \
+              | grep -q "com.apple.security.get-task-allow"; then
+            echo "Release app unexpectedly includes get-task-allow." >&2
+            exit 1
+          fi
+          codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -q "Timestamp="
 
           echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
           echo "CLI_PATH=$CLI_PATH" >> "$GITHUB_ENV"
@@ -180,13 +193,36 @@ jobs:
           : "${APPLE_API_PRIVATE_KEY:?Missing APPLE_API_PRIVATE_KEY secret}"
 
           API_KEY_PATH="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY_ID.p8"
+          NOTARY_RESULT_PATH="$RUNNER_TEMP/notarytool.json"
           printf '%s' "$APPLE_API_PRIVATE_KEY" > "$API_KEY_PATH"
 
           xcrun notarytool submit "$NOTARIZATION_ARCHIVE" \
             --key "$API_KEY_PATH" \
             --key-id "$APPLE_API_KEY_ID" \
             --issuer "$APPLE_API_ISSUER_ID" \
-            --wait
+            --wait \
+            --output-format json | tee "$NOTARY_RESULT_PATH"
+
+          SUBMISSION_ID="$(
+            python3 -c \
+              'import json, sys; print(json.load(open(sys.argv[1])).get("id", ""))' \
+              "$NOTARY_RESULT_PATH"
+          )"
+          NOTARY_STATUS="$(
+            python3 -c \
+              'import json, sys; print(json.load(open(sys.argv[1])).get("status", ""))' \
+              "$NOTARY_RESULT_PATH"
+          )"
+          if [[ "$NOTARY_STATUS" != "Accepted" ]]; then
+            if [[ -n "$SUBMISSION_ID" ]]; then
+              xcrun notarytool log "$SUBMISSION_ID" \
+                --key "$API_KEY_PATH" \
+                --key-id "$APPLE_API_KEY_ID" \
+                --issuer "$APPLE_API_ISSUER_ID" || true
+            fi
+            echo "Notarization failed with status: ${NOTARY_STATUS:-unknown}" >&2
+            exit 1
+          fi
 
           xcrun stapler staple "$STAGING_PATH/Orchard.app"
           xcrun stapler validate "$STAGING_PATH/Orchard.app"
