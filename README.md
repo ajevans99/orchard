@@ -55,20 +55,23 @@ Ensure `~/.local/bin` is on your `PATH`.
 
 ## Publishing a release
 
-Create the `ajevans99/homebrew-tap` repository and add these GitHub Actions
-secrets to this repository:
+Releases are published from the
+[GitHub Releases](https://github.com/ajevans99/orchard/releases) page:
 
-- `APPLE_TEAM_ID`
-- `DEVELOPER_ID_APPLICATION_P12_BASE64`
-- `DEVELOPER_ID_APPLICATION_P12_PASSWORD`
-- `APPLE_API_KEY_ID`
-- `APPLE_API_ISSUER_ID`
-- `APPLE_API_PRIVATE_KEY`
-- `HOMEBREW_TAP_TOKEN` with write access to `ajevans99/homebrew-tap`
+1. Choose **Draft a new release**.
+2. Create a version tag such as `v1.0.0`, targeting `main`.
+3. Write the release notes and mark test releases as prereleases.
+4. Publish the release.
 
-Push a version tag such as `v1.0` to build, sign, notarize, and publish the
-release. When `HOMEBREW_TAP_TOKEN` is configured, the workflow also updates the
-tap's `Casks/orchard.rb`.
+Publishing starts the release workflow at that tag. It builds universal app and
+CLI binaries, signs and notarizes them, staples the app, and uploads
+`Orchard-<tag>-macOS.zip` to the existing GitHub release. Stable releases also
+update `Casks/orchard.rb` in `ajevans99/homebrew-tap`; prereleases never update
+Homebrew.
+
+To test the build without creating a GitHub release, open **Actions → Release → Run
+workflow**. Manual runs upload their ZIP to the workflow run instead. Notarization
+is enabled by default and can be disabled for a faster build-only check.
 
 ## CLI
 

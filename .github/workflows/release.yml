@@ -1,9 +1,14 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      notarize:
+        description: "Submit the manual build for notarization"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -25,6 +30,31 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
+
+      - name: Resolve release context
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
+            if [[ "$RELEASE_TAG" != v* ]]; then
+              echo "Release tags must start with 'v'." >&2
+              exit 1
+            fi
+            VERSION="${RELEASE_TAG#v}"
+            ARTIFACT_NAME="Orchard-$RELEASE_TAG-macOS.zip"
+          else
+            VERSION="manual-$GITHUB_RUN_NUMBER"
+            ARTIFACT_NAME="Orchard-$VERSION-macOS.zip"
+          fi
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
 
       - name: Import Developer ID certificate
         id: signing
@@ -118,7 +148,29 @@ jobs:
           echo "CLI_PATH=$CLI_PATH" >> "$GITHUB_ENV"
           echo "SKILL_BUNDLE_PATH=$SKILL_BUNDLE_PATH" >> "$GITHUB_ENV"
 
+      - name: Stage release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          STAGING_PATH="$RUNNER_TEMP/Orchard-$VERSION"
+          NOTARIZATION_ARCHIVE="$RUNNER_TEMP/Orchard-notarization.zip"
+          RELEASE_ARCHIVE="$RUNNER_TEMP/$ARTIFACT_NAME"
+
+          mkdir -p "$STAGING_PATH"
+          ditto "$APP_PATH" "$STAGING_PATH/Orchard.app"
+          cp "$CLI_PATH" "$STAGING_PATH/orchard"
+          ditto "$SKILL_BUNDLE_PATH" "$STAGING_PATH/OrchardWindowTagSkill.bundle"
+          chmod +x "$STAGING_PATH/orchard"
+
+          ditto -c -k --sequesterRsrc "$STAGING_PATH" "$NOTARIZATION_ARCHIVE"
+
+          echo "STAGING_PATH=$STAGING_PATH" >> "$GITHUB_ENV"
+          echo "NOTARIZATION_ARCHIVE=$NOTARIZATION_ARCHIVE" >> "$GITHUB_ENV"
+          echo "RELEASE_ARCHIVE=$RELEASE_ARCHIVE" >> "$GITHUB_ENV"
+
       - name: Notarize release
+        if: ${{ github.event_name == 'release' || inputs.notarize }}
         shell: bash
         run: |
           set -euo pipefail
@@ -127,20 +179,9 @@ jobs:
           : "${APPLE_API_ISSUER_ID:?Missing APPLE_API_ISSUER_ID secret}"
           : "${APPLE_API_PRIVATE_KEY:?Missing APPLE_API_PRIVATE_KEY secret}"
 
-          VERSION="${GITHUB_REF_NAME#v}"
-          STAGING_PATH="$RUNNER_TEMP/Orchard-$VERSION"
-          NOTARIZATION_ARCHIVE="$RUNNER_TEMP/Orchard-notarization.zip"
-          RELEASE_ARCHIVE="$RUNNER_TEMP/Orchard-$GITHUB_REF_NAME-macOS.zip"
           API_KEY_PATH="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY_ID.p8"
-
-          mkdir -p "$STAGING_PATH"
-          ditto "$APP_PATH" "$STAGING_PATH/Orchard.app"
-          cp "$CLI_PATH" "$STAGING_PATH/orchard"
-          ditto "$SKILL_BUNDLE_PATH" "$STAGING_PATH/OrchardWindowTagSkill.bundle"
-          chmod +x "$STAGING_PATH/orchard"
           printf '%s' "$APPLE_API_PRIVATE_KEY" > "$API_KEY_PATH"
 
-          ditto -c -k --sequesterRsrc "$STAGING_PATH" "$NOTARIZATION_ARCHIVE"
           xcrun notarytool submit "$NOTARIZATION_ARCHIVE" \
             --key "$API_KEY_PATH" \
             --key-id "$APPLE_API_KEY_ID" \
@@ -151,25 +192,39 @@ jobs:
           xcrun stapler validate "$STAGING_PATH/Orchard.app"
           spctl --assess --type execute --verbose=2 "$STAGING_PATH/Orchard.app"
 
+      - name: Package release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -f "$RELEASE_ARCHIVE"
           ditto -c -k --sequesterRsrc "$STAGING_PATH" "$RELEASE_ARCHIVE"
-          echo "RELEASE_ARCHIVE=$RELEASE_ARCHIVE" >> "$GITHUB_ENV"
           echo "RELEASE_SHA256=$(shasum -a 256 "$RELEASE_ARCHIVE" | awk '{ print $1 }')" \
             >> "$GITHUB_ENV"
 
-      - name: Publish GitHub release
+      - name: Upload GitHub release asset
+        if: ${{ github.event_name == 'release' }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "$GITHUB_REF_NAME" \
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release upload "$RELEASE_TAG" \
             "$RELEASE_ARCHIVE" \
-            --verify-tag \
-            --generate-notes \
-            --title "Orchard $GITHUB_REF_NAME"
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+      - name: Upload manual build artifact
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: Orchard-manual-${{ github.run_number }}
+          path: ${{ runner.temp }}/Orchard-manual-${{ github.run_number }}-macOS.zip
+          if-no-files-found: error
 
       - name: Check out Homebrew tap
-        if: env.HOMEBREW_TAP_TOKEN != ''
+        if: ${{ github.event_name == 'release' && github.event.release.prerelease == false && env.HOMEBREW_TAP_TOKEN != '' }}
         uses: actions/checkout@v7
         with:
           repository: ajevans99/homebrew-tap
@@ -177,12 +232,11 @@ jobs:
           path: homebrew-tap
 
       - name: Update Homebrew cask
-        if: env.HOMEBREW_TAP_TOKEN != ''
+        if: ${{ github.event_name == 'release' && github.event.release.prerelease == false && env.HOMEBREW_TAP_TOKEN != '' }}
         shell: bash
         run: |
           set -euo pipefail
 
-          VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p homebrew-tap/Casks
           cat > homebrew-tap/Casks/orchard.rb <<EOF
           cask "orchard" do
