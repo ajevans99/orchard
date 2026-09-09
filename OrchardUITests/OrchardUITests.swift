@@ -38,6 +38,25 @@ final class OrchardUITests: XCTestCase {
     }
 
     @MainActor
+    func testIdentityInspectorShowsActiveWindow() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        addTeardownBlock { app.terminate() }
+
+        let menu = app.windows["Orchard UI Tests"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        menu.buttons["inspect-window-identity"].click()
+
+        let inspector = app.windows["Window Identity"]
+        XCTAssertTrue(inspector.waitForExistence(timeout: 5))
+        XCTAssertTrue(inspector.staticTexts["Live window only"].exists)
+        XCTAssertTrue(inspector.staticTexts["Hello, Orchard"].exists)
+        XCTAssertTrue(inspector.staticTexts["ui-active"].exists)
+        XCTAssertTrue(inspector.staticTexts["Recent identity decisions"].exists)
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         measure(metrics: [XCTApplicationLaunchMetric()]) {
             let app = XCUIApplication()
