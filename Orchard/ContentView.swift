@@ -63,6 +63,7 @@ struct ContentView: View {
             footer
         }
         .frame(width: 420)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("orchard-menu")
         .onAppear {
             OrchardTelemetry.track(
@@ -118,6 +119,17 @@ struct ContentView: View {
 
             Spacer()
 
+            Button {
+                controller.showIdentityInspector()
+            } label: {
+                Label("Inspect", systemImage: "info.circle")
+            }
+            .buttonStyle(.plain)
+            .help("See why Orchard attached or detached a tag")
+            .accessibilityIdentifier("inspect-window-identity")
+
+            Spacer()
+
             Text("\(controller.windows.count) windows")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -132,6 +144,127 @@ struct ContentView: View {
             .buttonStyle(.plain)
         }
         .padding(12)
+    }
+}
+
+@MainActor
+final class IdentityInspectorWindowController: NSWindowController {
+    init(controller: OrchardController) {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 640),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Window Identity"
+        window.minSize = NSSize(width: 480, height: 400)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: WindowIdentityInspector(controller: controller))
+        window.center()
+        super.init(window: window)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+private struct WindowIdentityInspector: View {
+    @ObservedObject var controller: OrchardController
+    @State private var selectedWindowID: String?
+
+    private var inspectedWindowID: String? {
+        selectedWindowID ?? controller.activeWindowID
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Picker("Inspect", selection: $selectedWindowID) {
+                Text("Follow active window").tag(String?.none)
+                ForEach(controller.windows) { window in
+                    Text("\(window.appName): \(window.displayTitle)").tag(Optional(window.id))
+                }
+            }
+            .accessibilityIdentifier("identity-window-picker")
+
+            if let id = inspectedWindowID,
+               let window = controller.windows.first(where: { $0.id == id }),
+               let diagnostics = controller.windowDiagnostics[id] {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        GroupBox("Why this tag?") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                LabeledContent("Application", value: window.appName)
+                                LabeledContent("Native title", value: window.nativeTitle)
+                                LabeledContent("Tag", value: window.customTitle ?? "No title tag")
+                                LabeledContent("Color", value: window.color?.displayName ?? "None")
+                                LabeledContent("Identity source", value: diagnostics.sourceDescription)
+                                    .accessibilityIdentifier("identity-source")
+                                Text(diagnostics.persistenceDescription)
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(6)
+                        }
+                        GroupBox("Observed identity") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                LabeledContent("Orchard ID", value: diagnostics.windowID)
+                                LabeledContent("Process ID", value: String(diagnostics.processIdentifier))
+                                LabeledContent("Bundle ID", value: window.bundleIdentifier)
+                                LabeledContent("AX document", value: diagnostics.document ?? "Not exposed")
+                                LabeledContent("Resolved context", value: diagnostics.contextPath ?? "Unavailable")
+                                if let head = diagnostics.head {
+                                    LabeledContent("Git HEAD", value: head)
+                                }
+                                LabeledContent("Matching windows", value: String(diagnostics.matchingContextCount))
+                                if let error = diagnostics.contextError {
+                                    Text(error)
+                                        .foregroundStyle(.red)
+                                }
+                            }
+                            .font(.callout)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(6)
+                        }
+                        GroupBox("Recent identity decisions") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                ForEach(diagnostics.transitions.reversed()) { transition in
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(transition.date.formatted(date: .omitted, time: .standard))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text(transition.summary)
+                                        if let previous = transition.previousWindowID,
+                                           previous != transition.windowID {
+                                            Text("\(previous) -> \(transition.windowID)")
+                                                .font(.caption.monospaced())
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(6)
+                        }
+                    }
+                    .textSelection(.enabled)
+                }
+            } else {
+                ContentUnavailableView(
+                    "No Window to Inspect",
+                    systemImage: "macwindow",
+                    description: Text("Focus another app or choose a live window. A pinned identity may have closed or changed.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            Text("Local diagnostics only. The latest 10 decisions per live window are included in Orchard's local snapshot, never telemetry.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .frame(minWidth: 440, minHeight: 360)
     }
 }
 

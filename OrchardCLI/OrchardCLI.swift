@@ -67,6 +67,7 @@ struct OrchardCLI: ParsableCommand {
         abstract: "Name, color, and focus your macOS windows.",
         subcommands: [
             ListCommand.self,
+            InspectCommand.self,
             TagCommand.self,
             LabelCommand.self,
             ColorCommand.self,
@@ -88,6 +89,32 @@ private struct ListCommand: ParsableCommand {
 
     mutating func run() throws {
         try OrchardOperations.list(json: json)
+    }
+}
+
+private struct InspectCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "inspect",
+        abstract: "Explain a window's identity and recent tag attachment decisions."
+    )
+
+    @Argument(help: "The window ID shown by 'orchard list'; omit when using --current.")
+    var windowID: String?
+
+    @Flag(name: .long, help: "Inspect Orchard's currently focused window using a fresh snapshot.")
+    var current = false
+
+    @Flag(name: .long, help: "Print the window and identity diagnostics as JSON.")
+    var json = false
+
+    func validate() throws {
+        guard current != (windowID != nil) else {
+            throw ValidationError("Provide either a window ID or --current, but not both.")
+        }
+    }
+
+    mutating func run() throws {
+        try OrchardOperations.inspect(windowID: windowID, current: current, json: json)
     }
 }
 
@@ -327,6 +354,77 @@ private struct InstallSkillCommand: ParsableCommand {
 }
 
 private enum OrchardOperations {
+    private struct Inspection: Encodable {
+        let updatedAt: Date
+        let isStale: Bool
+        let window: WindowRecord
+        let source: String
+        let persistence: String
+        let identity: WindowIdentityDiagnostics
+    }
+
+    static func inspect(windowID: String?, current: Bool, json: Bool) throws {
+        let snapshot = try loadSnapshot(requireFresh: current)
+        let window: WindowRecord
+        if current {
+            window = try CurrentWindowResolver.resolve(
+                snapshot: snapshot,
+                now: Date(),
+                freshnessInterval: OrchardConstants.snapshotFreshnessInterval
+            )
+        } else {
+            guard let windowID,
+                  let record = snapshot.windows.first(where: { $0.id == windowID }) else {
+                throw OrchardProtocolError.unknownWindow(windowID ?? "")
+            }
+            window = record
+        }
+        guard let identity = snapshot.diagnostics?[window.id] else {
+            throw ValidationError("Identity diagnostics are unavailable. Run the updated Orchard app and refresh its window list.")
+        }
+        guard identity.windowID == window.id else {
+            throw OrchardProtocolError.snapshotMalformed("the identity diagnostics do not match the requested window")
+        }
+        let age = Date().timeIntervalSince(snapshot.updatedAt)
+        let inspection = Inspection(
+            updatedAt: snapshot.updatedAt,
+            isStale: age > OrchardConstants.snapshotFreshnessInterval
+                || age < -OrchardConstants.discoveryRefreshInterval,
+            window: window,
+            source: identity.sourceDescription,
+            persistence: identity.persistenceDescription,
+            identity: identity
+        )
+        if json {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            print(String(decoding: try encoder.encode(inspection), as: UTF8.self))
+            return
+        }
+        print("Snapshot: \(snapshot.updatedAt.formatted())\(inspection.isStale ? " (STALE)" : "")")
+        print("Application: \(window.appName) (\(window.bundleIdentifier))")
+        print("Window ID: \(window.id)")
+        print("Process ID: \(identity.processIdentifier)")
+        print("Native title: \(window.nativeTitle)")
+        print("Tag: \(window.customTitle ?? "(none)")")
+        print("Color: \(window.color?.rawValue ?? "(none)")")
+        print("Identity source: \(identity.sourceDescription)")
+        print("Persistence: \(identity.persistenceDescription)")
+        print("AX document: \(identity.document ?? "(not exposed)")")
+        print("Resolved context: \(identity.contextPath ?? "(unavailable)")")
+        if let head = identity.head { print("Git HEAD: \(head)") }
+        print("Matching windows: \(identity.matchingContextCount)")
+        if let error = identity.contextError { print("Context error: \(error)") }
+        print("\nRecent identity decisions (newest first):")
+        for transition in identity.transitions.reversed() {
+            print("  \(transition.date.formatted()): \(transition.summary)")
+            if let previous = transition.previousWindowID, previous != transition.windowID {
+                print("    \(previous) -> \(transition.windowID)")
+            }
+        }
+    }
+
     static func list(json: Bool) throws {
         let snapshot = try loadSnapshot(requireFresh: false)
         if json {

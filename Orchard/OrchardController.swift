@@ -57,13 +57,26 @@ final class OrchardController: ObservableObject {
     @Published private(set) var windows: [WindowRecord] = []
     @Published private(set) var isAccessibilityTrusted = false
     @Published private(set) var activeWindowID: String?
+    @Published private(set) var windowDiagnostics: [String: WindowIdentityDiagnostics] = [:]
 
     private struct TrackedWindow {
         let record: WindowRecord
         let processIdentifier: pid_t
+        let applicationLaunchDate: Date?
         let element: AXUIElement
         let frame: CGRect
         let windowNumber: CGWindowID?
+        let context: WindowContext?
+        let diagnostics: WindowIdentityDiagnostics
+    }
+
+    private struct WindowCandidate {
+        let element: AXUIElement
+        let title: String
+        let frame: CGRect
+        let context: WindowContext?
+        let document: String?
+        let contextError: String?
     }
 
     private struct HandledCommand {
@@ -92,6 +105,7 @@ final class OrchardController: ObservableObject {
     private var displayLinkContext: DisplayLinkContext?
     private var activeTrackedWindow: TrackedWindow?
     private let outlineController = OutlineController()
+    private var identityInspector: IdentityInspectorWindowController?
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "Orchard",
         category: "Accessibility"
@@ -129,6 +143,18 @@ final class OrchardController: ObservableObject {
                 ),
             ]
             activeWindowID = "ui-active"
+            windowDiagnostics = Dictionary(uniqueKeysWithValues: windows.map { record in
+                (
+                    record.id,
+                    WindowIdentityDiagnostics(
+                        previous: nil, windowID: record.id,
+                        bundleIdentifier: record.bundleIdentifier, nativeTitle: record.nativeTitle,
+                        processIdentifier: ProcessInfo.processInfo.processIdentifier,
+                        document: nil, context: nil, contextError: nil, matchingContextCount: 0,
+                        hasSavedLabel: record.customTitle != nil, now: Date()
+                    )
+                )
+            })
             return
         }
 
@@ -192,6 +218,14 @@ final class OrchardController: ObservableObject {
         openAccessibilitySettings()
     }
 
+    func showIdentityInspector() {
+        if identityInspector == nil {
+            identityInspector = IdentityInspectorWindowController(controller: self)
+        }
+        identityInspector?.showWindow(nil)
+        NSApplication.shared.activate()
+    }
+
     func refresh(manual: Bool = false) {
         let accessibilityTrusted = AXIsProcessTrusted()
         if accessibilityTrusted != isAccessibilityTrusted {
@@ -205,6 +239,7 @@ final class OrchardController: ObservableObject {
         guard isAccessibilityTrusted else {
             windows = []
             trackedWindows = [:]
+            windowDiagnostics = [:]
             lastFocusedElement = nil
             activeTrackedWindow = nil
             setActiveWindow(nil)
@@ -284,59 +319,82 @@ final class OrchardController: ObservableObject {
 
     private func discoverWindows() -> [TrackedWindow] {
         var discovered: [TrackedWindow] = []
-        var occurrences: [String: Int] = [:]
         var windowServerWindows = copyWindowServerWindows()
         let previousTrackedWindows = Array(trackedWindows.values)
-        let reservedWindowIDs = Set(previousTrackedWindows.map(\.record.id))
         var reusedWindowIDs = Set<String>()
-
-        for application in NSWorkspace.shared.runningApplications {
-            guard
-                application.activationPolicy == .regular,
-                application.processIdentifier != ProcessInfo.processInfo.processIdentifier
-            else {
-                continue
+        let applications = NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular
+                && $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
+        }
+        var candidatesByProcess: [pid_t: [WindowCandidate]] = [:]
+        var contextCounts: [String: Int] = [:]
+        for application in applications {
+            let bundleIdentifier = application.bundleIdentifier ?? "pid.\(application.processIdentifier)"
+            let appElement = AXUIElementCreateApplication(application.processIdentifier)
+            let candidates = copyWindows(from: appElement).compactMap { element -> WindowCandidate? in
+                guard let title = copyString(kAXTitleAttribute as CFString, from: element),
+                      let frame = copyFrame(from: element),
+                      frame.width > 40, frame.height > 40 else { return nil }
+                let document = copyString(kAXDocumentAttribute as CFString, from: element)
+                let observation = resolveWindowContext(document: document)
+                return WindowCandidate(
+                    element: element,
+                    title: title.isEmpty ? "Untitled" : title,
+                    frame: frame,
+                    context: observation.context,
+                    document: document,
+                    contextError: observation.error
+                )
             }
+            candidatesByProcess[application.processIdentifier] = candidates
+            for candidate in candidates {
+                if let context = candidate.context {
+                    contextCounts[context.windowID(bundleIdentifier: bundleIdentifier), default: 0] += 1
+                }
+            }
+        }
 
+        for application in applications {
             let bundleIdentifier = application.bundleIdentifier ?? "pid.\(application.processIdentifier)"
             let appName = application.localizedName ?? bundleIdentifier
-            let appElement = AXUIElementCreateApplication(application.processIdentifier)
-
-            for element in copyWindows(from: appElement) {
-                guard let nativeTitle = copyString(kAXTitleAttribute as CFString, from: element) else {
-                    continue
-                }
-
-                let normalizedTitle = nativeTitle.isEmpty ? "Untitled" : nativeTitle
-                let occurrenceKey = "\(bundleIdentifier)\u{0}\(normalizedTitle)"
-                let occurrence = occurrences[occurrenceKey, default: 0]
-                occurrences[occurrenceKey] = occurrence + 1
-                let existingID = previousTrackedWindows.first {
+            let candidates = candidatesByProcess[application.processIdentifier] ?? []
+            for candidate in candidates {
+                let element = candidate.element
+                let normalizedTitle = candidate.title
+                let frame = candidate.frame
+                let existing = previousTrackedWindows.first {
                     $0.processIdentifier == application.processIdentifier
+                        && $0.applicationLaunchDate == application.launchDate
+                        && $0.record.bundleIdentifier == bundleIdentifier
                         && !reusedWindowIDs.contains($0.record.id)
                         && CFEqual($0.element, element)
-                }?.record.id
-                let id: String
-                if let existingID {
-                    id = existingID
-                } else {
-                    var candidate = WindowIdentifier.make(
-                        bundleIdentifier: bundleIdentifier,
-                        nativeTitle: normalizedTitle,
-                        occurrence: occurrence
-                    )
-                    var fallbackOccurrence = occurrence
-                    while reusedWindowIDs.contains(candidate)
-                        || reservedWindowIDs.contains(candidate) {
-                        fallbackOccurrence += 1
-                        candidate = WindowIdentifier.make(
-                            bundleIdentifier: bundleIdentifier,
-                            nativeTitle: normalizedTitle,
-                            occurrence: fallbackOccurrence
-                        )
-                    }
-                    id = candidate
                 }
+                // Reserve identities belonging to other live AX windows, not a
+                // disappeared window or this window's previous workspace.
+                let otherLiveIDs = previousTrackedWindows.filter { previous in
+                    !CFEqual(previous.element, element)
+                        && (candidatesByProcess[previous.processIdentifier] ?? []).contains {
+                            CFEqual(previous.element, $0.element)
+                                && previous.context == $0.context
+                        }
+                }.map(\.record.id)
+                let matchingContextCount = candidate.context.map {
+                    contextCounts[$0.windowID(bundleIdentifier: bundleIdentifier)] ?? 0
+                } ?? 0
+                let id = WindowIdentity.resolve(
+                    bundleIdentifier: bundleIdentifier,
+                    nativeTitle: normalizedTitle,
+                    context: candidate.context,
+                    previous: existing.map {
+                        WindowIdentity.Previous(
+                            id: $0.record.id,
+                            nativeTitle: $0.record.nativeTitle,
+                            context: $0.context
+                        )
+                    },
+                    matchingContextCount: matchingContextCount,
+                    unavailableIDs: reusedWindowIDs.union(otherLiveIDs)
+                )
                 reusedWindowIDs.insert(id)
                 let label = labels[id]
                 let record = WindowRecord(
@@ -349,9 +407,6 @@ final class OrchardController: ObservableObject {
                     agent: label?.agent
                 )
 
-                guard let frame = copyFrame(from: element), frame.width > 40, frame.height > 40 else {
-                    continue
-                }
                 let windowNumber = takeWindowNumber(
                     processIdentifier: application.processIdentifier,
                     frame: frame,
@@ -366,15 +421,56 @@ final class OrchardController: ObservableObject {
                     TrackedWindow(
                         record: record,
                         processIdentifier: application.processIdentifier,
+                        applicationLaunchDate: application.launchDate,
                         element: element,
                         frame: frame,
-                        windowNumber: windowNumber
+                        windowNumber: windowNumber,
+                        context: candidate.context,
+                        diagnostics: WindowIdentityDiagnostics(
+                            previous: existing?.diagnostics,
+                            windowID: id, bundleIdentifier: bundleIdentifier,
+                            nativeTitle: normalizedTitle,
+                            processIdentifier: application.processIdentifier,
+                            document: candidate.document, context: candidate.context,
+                            contextError: candidate.contextError,
+                            matchingContextCount: matchingContextCount,
+                            hasSavedLabel: label != nil, now: Date()
+                        )
                     )
                 )
             }
         }
 
+        let diagnostics = Dictionary(uniqueKeysWithValues: discovered.map {
+            ($0.record.id, $0.diagnostics)
+        })
+        if diagnostics != windowDiagnostics {
+            windowDiagnostics = diagnostics
+        }
         return discovered
+    }
+
+    private func windowContext(for element: AXUIElement) -> WindowContext? {
+        resolveWindowContext(
+            document: copyString(kAXDocumentAttribute as CFString, from: element)
+        ).context
+    }
+
+    private func resolveWindowContext(document: String?) -> (context: WindowContext?, error: String?) {
+        do {
+            return (try WindowContext.resolve(document: document), nil)
+        } catch {
+            logger.error("Unable to resolve window context: \(error.localizedDescription, privacy: .private)")
+            return (nil, error.localizedDescription)
+        }
+    }
+
+    private func windowContextChanged(for tracked: TrackedWindow) -> Bool {
+        let context = windowContext(for: tracked.element)
+        if context != tracked.context { return true }
+        guard context == nil else { return false }
+        let title = copyString(kAXTitleAttribute as CFString, from: tracked.element)
+        return title.map { $0.isEmpty ? "Untitled" : $0 } != tracked.record.nativeTitle
     }
 
     private func updateOutline(preferredActiveWindowID: String? = nil) {
@@ -402,10 +498,22 @@ final class OrchardController: ObservableObject {
             return
         }
 
-        // Opening Orchard's menu should not discard the window that was active beneath it.
-        guard frontmostPID != ProcessInfo.processInfo.processIdentifier else { return }
+        // Keep tracking the underlying window while Orchard's menu or tag is active,
+        // but still revalidate its workspace instead of retaining a stale outline.
+        var focusedPID = frontmostPID
+        let candidateElement: AXUIElement?
+        if frontmostPID == ProcessInfo.processInfo.processIdentifier {
+            if let lastFocusedElement,
+               AXUIElementGetPid(lastFocusedElement, &focusedPID) == .success {
+                candidateElement = lastFocusedElement
+            } else {
+                candidateElement = nil
+            }
+        } else {
+            candidateElement = focusedWindow(for: focusedPID)
+        }
 
-        guard let focusedElement = focusedWindow(for: frontmostPID) else {
+        guard let focusedElement = candidateElement else {
             lastFocusedElement = nil
             setActiveWindow(nil)
             activeTrackedWindow = nil
@@ -415,7 +523,7 @@ final class OrchardController: ObservableObject {
             return
         }
 
-        observeWindow(focusedElement, processIdentifier: frontmostPID)
+        observeWindow(focusedElement, processIdentifier: focusedPID)
 
         let focusedWindowChanged = lastFocusedElement.map {
             !CFEqual($0, focusedElement)
@@ -423,15 +531,24 @@ final class OrchardController: ObservableObject {
         lastFocusedElement = focusedElement
 
         var tracked = trackedWindows.values.first {
-            $0.processIdentifier == frontmostPID && CFEqual($0.element, focusedElement)
+            $0.processIdentifier == focusedPID && CFEqual($0.element, focusedElement)
         }
-        if tracked == nil && focusedWindowChanged {
+        if (tracked == nil && focusedWindowChanged)
+            || tracked.map({ windowContextChanged(for: $0) }) == true {
             let discovered = discoverWindows()
             trackedWindows = Dictionary(uniqueKeysWithValues: discovered.map { ($0.record.id, $0) })
             windows = sortedRecords(discovered.map(\.record))
             tracked = trackedWindows.values.first {
-                $0.processIdentifier == frontmostPID && CFEqual($0.element, focusedElement)
+                $0.processIdentifier == focusedPID && CFEqual($0.element, focusedElement)
             }
+            persistSnapshot(
+                WindowSnapshot(
+                    updatedAt: Date(),
+                    windows: windows,
+                    activeWindowID: tracked?.record.id,
+                    diagnostics: windowDiagnostics
+                )
+            )
         }
 
         setActiveWindow(tracked?.record.id)
@@ -608,6 +725,11 @@ final class OrchardController: ObservableObject {
                 observedWindow,
                 kAXUIElementDestroyedNotification as CFString
             )
+            AXObserverRemoveNotification(
+                observer,
+                observedWindow,
+                kAXTitleChangedNotification as CFString
+            )
         }
 
         observedWindow = window
@@ -626,6 +748,12 @@ final class OrchardController: ObservableObject {
         )
         addNotification(
             kAXUIElementDestroyedNotification as CFString,
+            to: window,
+            observer: observer,
+            context: context
+        )
+        addNotification(
+            kAXTitleChangedNotification as CFString,
             to: window,
             observer: observer,
             context: context
@@ -733,6 +861,12 @@ final class OrchardController: ObservableObject {
             case .command(let url, let command):
                 do {
                     try command.validateFreshness(now: Date())
+                    if let tracked = trackedWindows[command.windowID],
+                       windowContextChanged(for: tracked) {
+                        throw OrchardProtocolError.invalidCommand(
+                            "the target window changed workspace; refresh and retry"
+                        )
+                    }
                     let application = try OrchardCommandApplier.apply(
                         command,
                         validWindowIDs: validWindowIDs,
@@ -829,6 +963,12 @@ final class OrchardController: ObservableObject {
             OrchardTelemetry.track(.windowFocused(source: source, succeeded: false))
             throw OrchardProtocolError.unknownWindow(windowID)
         }
+        guard !windowContextChanged(for: tracked) else {
+            OrchardTelemetry.track(.windowFocused(source: source, succeeded: false))
+            throw OrchardProtocolError.invalidCommand(
+                "the target window changed workspace; refresh and retry"
+            )
+        }
         guard let application = NSRunningApplication(
             processIdentifier: tracked.processIdentifier
         ), application.activate() else {
@@ -874,9 +1014,12 @@ final class OrchardController: ObservableObject {
                     agent: label?.agent
                 ),
                 processIdentifier: tracked.processIdentifier,
+                applicationLaunchDate: tracked.applicationLaunchDate,
                 element: tracked.element,
                 frame: tracked.frame,
-                windowNumber: tracked.windowNumber
+                windowNumber: tracked.windowNumber,
+                context: tracked.context,
+                diagnostics: tracked.diagnostics
             )
         }
         windows = sortedRecords(trackedWindows.values.map(\.record))
@@ -897,7 +1040,8 @@ final class OrchardController: ObservableObject {
         WindowSnapshot(
             updatedAt: Date(),
             windows: windows,
-            activeWindowID: activeWindowID
+            activeWindowID: activeWindowID,
+            diagnostics: windowDiagnostics
         )
     }
 

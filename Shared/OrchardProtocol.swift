@@ -77,15 +77,54 @@ nonisolated struct WindowRecord: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
+nonisolated struct WindowIdentityDiagnostics: Codable, Equatable, Sendable {
+    struct Transition: Codable, Equatable, Identifiable, Sendable {
+        let id: Int
+        let date: Date
+        let summary: String
+        let previousWindowID: String?
+        let windowID: String
+    }
+
+    let windowID: String
+    let nativeTitle: String
+    let processIdentifier: Int32
+    let document: String?
+    let contextPath: String?
+    let head: String?
+    let contextError: String?
+    let matchingContextCount: Int
+    let isRestorable: Bool
+    let transitions: [Transition]
+
+    var sourceDescription: String {
+        guard contextPath != nil else { return "Live window only" }
+        return head == nil ? "Document path or URL" : "Git worktree + HEAD"
+    }
+
+    var persistenceDescription: String {
+        isRestorable
+            ? "Saved context; restored only when unambiguous."
+            : "Runtime only; not restored by title or window order."
+    }
+}
+
 nonisolated struct WindowSnapshot: Codable, Equatable, Sendable {
     let updatedAt: Date
     let windows: [WindowRecord]
     let activeWindowID: String?
+    let diagnostics: [String: WindowIdentityDiagnostics]?
 
-    init(updatedAt: Date, windows: [WindowRecord], activeWindowID: String? = nil) {
+    init(
+        updatedAt: Date,
+        windows: [WindowRecord],
+        activeWindowID: String? = nil,
+        diagnostics: [String: WindowIdentityDiagnostics]? = nil
+    ) {
         self.updatedAt = updatedAt
         self.windows = windows
         self.activeWindowID = activeWindowID
+        self.diagnostics = diagnostics
     }
 }
 
@@ -1482,14 +1521,23 @@ nonisolated enum OrchardSkillInstaller {
 }
 
 nonisolated enum WindowIdentifier {
+    static func makeContext(bundleIdentifier: String, path: String, head: String?) -> String {
+        let source = "\(bundleIdentifier)\u{0}\(path)\u{0}\(head ?? "")"
+        return "workspace-" + String(format: "%016llx", hash(source))
+    }
+
     static func make(bundleIdentifier: String, nativeTitle: String, occurrence: Int = 0) -> String {
         let source = "\(bundleIdentifier)\u{0}\(nativeTitle)\u{0}\(occurrence)"
+        return String(format: "%08llx", hash(source) & 0xffff_ffff)
+    }
+
+    private static func hash(_ source: String) -> UInt64 {
         var hash: UInt64 = 14_695_981_039_346_656_037
         for byte in source.utf8 {
             hash ^= UInt64(byte)
             hash = hash &* 1_099_511_628_211
         }
-        return String(format: "%08llx", hash & 0xffff_ffff)
+        return hash
     }
 }
 

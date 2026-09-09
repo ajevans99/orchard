@@ -11,10 +11,26 @@ focusing windows across applications.
 - Focus labeled windows from the menu bar or CLI.
 - Persist labels in `~/Library/Application Support/Orchard/`.
 
-Orchard identifies a window from its application bundle ID and native title.
-Already-tracked Accessibility windows keep their runtime identity when the
-native title changes. Across Orchard relaunches, apps that frequently rewrite
-window titles may still receive a new identity.
+Window identity is capability-based, with no app-specific allowlist. Orchard
+uses each window's public Accessibility document information when available.
+For local documents in Git, it identifies the canonical worktree and its
+checked-out branch (or detached HEAD). Opening another file in the same worktree
+keeps its tag; switching worktrees or branches in a reused window selects a
+different tag. Outside Git, the full document path or URL identifies the context.
+Returning to a uniquely identified context restores its saved tag, including
+after relaunch.
+
+Windows with no document information, or multiple windows for the same context,
+are not restored by title or window-list order. Ambiguous windows receive
+runtime-only identities tied to their live Accessibility window. Losing the
+document context or changing an unresolved window's title detaches the old tag
+rather than guessing. This can also detach tags on routine title changes in apps
+that expose no document information. Context changes are detected through title
+notifications and polling; changes that an app does not expose through its
+document information or title cannot be distinguished.
+
+Older title-based labels remain on disk but must be reapplied once, since their
+original document/worktree cannot be recovered safely.
 
 ## Privacy
 
@@ -85,6 +101,8 @@ check.
 
 ```text
 orchard list
+orchard inspect --current
+orchard inspect <window-id> --json
 orchard tag --current --title "Agent worktree tagging"
 orchard label <window-id> "API debugging"
 orchard color <window-id> purple
@@ -113,6 +131,40 @@ snapshot and fails rather than guessing when the snapshot is stale, no focused
 window exists, or the focused ID is inconsistent. Existing `label`, `color`,
 `focus`, and `clear` syntax remains supported. All mutations use Orchard's
 serialized command queue, and the app is the sole writer of labels.
+
+## Inspecting window identity
+
+Choose **Inspect** in Orchard's menu to open the **Window Identity** inspector.
+It follows the active window by default, so you can leave it open while changing
+files, branches, or worktrees in another app. You can also pin a specific window
+from its picker. If that identity disappears, the inspector reports it rather
+than silently selecting another window.
+
+The inspector shows the native title, current tag/color, Orchard and process
+IDs, the document information exposed by Accessibility, the resolved context
+and Git HEAD, whether the identity can be restored, and any context-resolution
+error. Its latest 10 identity decisions explain preservation, detachment,
+restoration, and ambiguous matches. Ordinary polling does not add duplicate
+events.
+
+The CLI exposes the same information:
+
+```sh
+orchard inspect --current
+orchard inspect <window-id>
+orchard inspect --current --json
+```
+
+`--current` requires fresh, consistent focus, just like tagging. Inspection by
+ID can read the last snapshot even after Orchard stops and explicitly marks
+stale data. JSON includes the snapshot timestamp, `isStale`, the window record,
+and its identity diagnostics. Older app snapshots without diagnostics produce
+an explicit update/refresh error.
+
+Diagnostics are local only and never sent in telemetry. They include paths and
+titles in Orchard's existing `windows.json` snapshot; review them before sharing
+CLI output. The rolling history is scoped to live windows and is not reloaded
+after Orchard restarts.
 
 ## Agent skill
 

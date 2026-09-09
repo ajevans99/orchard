@@ -65,6 +65,350 @@ struct OrchardTests {
         #expect(record.displayTitle == "CLI work")
     }
 
+    @Test func windowContextsFollowWorktreesRatherThanOpenFiles() throws {
+        let root = try Self.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let git = root.appendingPathComponent(".git", isDirectory: true)
+        try FileManager.default.createDirectory(at: git, withIntermediateDirectories: true)
+        try Data("ref: refs/heads/main\n".utf8).write(to: git.appendingPathComponent("HEAD"))
+
+        let first = try #require(
+            try WindowContext.resolve(
+                document: root.appendingPathComponent("Sources/First.swift").absoluteString
+            )
+        )
+        let second = try WindowContext.resolve(
+            document: root.appendingPathComponent("Tests/Second File.swift").absoluteString
+        )
+        #expect(first == second)
+        #expect(first.path == WorktreeResolver.canonicalURL(root).path)
+        #expect(first.head == "ref: refs/heads/main")
+
+        try Data("ref: refs/heads/feature\n".utf8).write(to: git.appendingPathComponent("HEAD"))
+        let changedBranch = try WindowContext.resolve(
+            document: root.appendingPathComponent("Sources/First.swift").path
+        )
+        #expect(first != changedBranch)
+    }
+
+    @Test func linkedWorktreesUseTheirOwnGitDirectoryAndCanonicalPath() throws {
+        let root = try Self.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = root.appendingPathComponent("one", isDirectory: true)
+        let second = root.appendingPathComponent("two", isDirectory: true)
+        let metadata = root.appendingPathComponent("metadata", isDirectory: true)
+        for directory in [first, second, metadata] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        for directory in [first, second] {
+            try Data("gitdir: ../metadata\n".utf8).write(
+                to: directory.appendingPathComponent(".git")
+            )
+        }
+        try Data("ref: refs/heads/feature\n".utf8).write(
+            to: metadata.appendingPathComponent("HEAD")
+        )
+        let alias = root.appendingPathComponent("alias", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: first)
+
+        let context = try #require(try WindowContext.resolve(document: first.absoluteString))
+        #expect(context.head == "ref: refs/heads/feature")
+        #expect(context == (try WindowContext.resolve(document: alias.absoluteString)))
+        #expect(context != (try WindowContext.resolve(document: second.absoluteString)))
+
+        try Data(String(repeating: "a", count: 40).utf8).write(
+            to: metadata.appendingPathComponent("HEAD")
+        )
+        #expect(context != (try WindowContext.resolve(document: first.absoluteString)))
+    }
+
+    @Test func missingOrInvalidDocumentsDoNotInventAWorkspace() throws {
+        #expect(try WindowContext.resolve(document: nil) == nil)
+        #expect(try WindowContext.resolve(document: "") == nil)
+        #expect(try WindowContext.resolve(document: "untitled:Untitled-1") == nil)
+        #expect(try WindowContext.resolve(document: "about:blank") == nil)
+        #expect(try WindowContext.resolve(document: "relative/file.swift") == nil)
+
+        let root = try Self.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("invalid git file".utf8).write(to: root.appendingPathComponent(".git"))
+        #expect(throws: OrchardProtocolError.self) {
+            try WindowContext.resolve(document: root.absoluteString)
+        }
+    }
+
+    @Test func reusedWindowDoesNotCarryATagToAnotherWorktree() throws {
+        for bundle in ["com.apple.dt.Xcode", "com.microsoft.VSCode", "org.example.Terminal", "org.example.AnyApp"] {
+            let firstContext = WindowContext(path: "/worktrees/one", head: "ref: refs/heads/one")
+            let secondContext = WindowContext(path: "/worktrees/two", head: "ref: refs/heads/two")
+            let firstID = firstContext.windowID(bundleIdentifier: bundle)
+            let secondID = WindowIdentity.resolve(
+                bundleIdentifier: bundle,
+                nativeTitle: "Momentum",
+                context: secondContext,
+                previous: .init(id: firstID, nativeTitle: "Momentum", context: firstContext),
+                matchingContextCount: 1,
+                unavailableIDs: []
+            )
+            #expect(firstID != secondID)
+
+            var labels = [
+                firstID: WindowLabel(
+                    title: "First branch",
+                    color: .purple,
+                    agent: .init(provider: "copilot", sessionID: "one", worktreePath: firstContext.path)
+                )
+            ]
+            #expect(labels[secondID] == nil)
+            Self.expectProtocolError(.unknownWindow(firstID)) {
+                _ = try OrchardCommandApplier.apply(
+                    OrchardCommand(action: .setTitle, windowID: firstID, title: "Stale command"),
+                    validWindowIDs: [secondID],
+                    labels: &labels
+                )
+            }
+
+            let returnedID = WindowIdentity.resolve(
+                bundleIdentifier: bundle,
+                nativeTitle: "Momentum - Another.swift",
+                context: firstContext,
+                previous: .init(id: secondID, nativeTitle: "Momentum", context: secondContext),
+                matchingContextCount: 1,
+                unavailableIDs: []
+            )
+            #expect(returnedID == firstID)
+            #expect(labels[returnedID]?.title == "First branch")
+            #expect(labels[returnedID]?.color == .purple)
+            #expect(labels[returnedID]?.agent?.sessionID == "one")
+        }
+    }
+
+    @Test func documentURLsIdentifyContextsWithoutAnAppSpecificAdapter() throws {
+        let first = try #require(try WindowContext.resolve(document: "https://example.com/first"))
+        let second = try #require(try WindowContext.resolve(document: "https://example.com/second"))
+        #expect(first != second)
+        let bundle = "org.example.UnknownBrowser"
+        let firstID = first.windowID(bundleIdentifier: bundle)
+        #expect(
+            WindowIdentity.resolve(
+                bundleIdentifier: bundle, nativeTitle: "Updated page title", context: first,
+                previous: .init(id: firstID, nativeTitle: "Page title", context: first),
+                matchingContextCount: 1, unavailableIDs: []
+            ) == firstID
+        )
+        #expect(
+            WindowIdentity.resolve(
+                bundleIdentifier: bundle, nativeTitle: "Page title", context: second,
+                previous: .init(id: firstID, nativeTitle: "Page title", context: first),
+                matchingContextCount: 1, unavailableIDs: []
+            ) == second.windowID(bundleIdentifier: bundle)
+        )
+        #expect(
+            try WindowContext.resolve(document: "custom-app://server/documents/123")
+                == WindowContext(path: "custom-app://server/documents/123", head: nil)
+        )
+    }
+
+    @Test func unrelatedWindowsWithTheSameTitleNeverShareRuntimeIdentity() {
+        let first = WindowIdentity.resolve(
+            bundleIdentifier: "org.example.AnyApp", nativeTitle: "Untitled", context: nil,
+            previous: nil, matchingContextCount: 0, unavailableIDs: [],
+            makeRuntimeID: { "first-window" }
+        )
+        let second = WindowIdentity.resolve(
+            bundleIdentifier: "org.example.AnyApp", nativeTitle: "Untitled", context: nil,
+            previous: nil, matchingContextCount: 0, unavailableIDs: [first],
+            makeRuntimeID: { "second-window" }
+        )
+        #expect(first != second)
+        let relaunched = WindowIdentity.resolve(
+            bundleIdentifier: "org.example.AnyApp", nativeTitle: "Untitled", context: nil,
+            previous: nil, matchingContextCount: 0, unavailableIDs: [],
+            makeRuntimeID: { "relaunched-window" }
+        )
+        #expect(relaunched != first)
+        #expect(relaunched != second)
+    }
+
+    @Test func titlesCanChangeWithoutChangingWorkspaceIdentity() {
+        let context = WindowContext(path: "/worktrees/one", head: "ref: refs/heads/main")
+        let id = context.windowID(bundleIdentifier: "com.apple.dt.Xcode")
+        #expect(
+            WindowIdentity.resolve(
+                bundleIdentifier: "com.apple.dt.Xcode",
+                nativeTitle: "Momentum - Second.swift",
+                context: context,
+                previous: .init(id: id, nativeTitle: "Momentum - First.swift", context: context),
+                matchingContextCount: 1,
+                unavailableIDs: []
+            ) == id
+        )
+        let otherBranch = WindowContext(path: context.path, head: "ref: refs/heads/feature")
+        #expect(otherBranch.windowID(bundleIdentifier: "com.apple.dt.Xcode") != id)
+        #expect(context.windowID(bundleIdentifier: "com.microsoft.VSCode") != id)
+    }
+
+    @Test func relaunchRestoresByContextNotTitleOrDiscoveryOrder() {
+        let first = WindowContext(path: "/one/Momentum", head: "ref: refs/heads/main")
+        let second = WindowContext(path: "/two/Momentum", head: "ref: refs/heads/main")
+        for contexts in [[first, second], [second, first]] {
+            var used = Set<String>()
+            for context in contexts {
+                let id = WindowIdentity.resolve(
+                    bundleIdentifier: "com.apple.dt.Xcode",
+                    nativeTitle: "Momentum",
+                    context: context,
+                    previous: nil,
+                    matchingContextCount: 1,
+                    unavailableIDs: used
+                )
+                #expect(id == context.windowID(bundleIdentifier: "com.apple.dt.Xcode"))
+                #expect(id != WindowIdentifier.make(bundleIdentifier: "com.apple.dt.Xcode", nativeTitle: "Momentum"))
+                used.insert(id)
+            }
+            #expect(used.count == 2)
+        }
+    }
+
+    @Test func ambiguousWindowsNeverClaimAnotherWindowsLabel() {
+        let bundle = "com.apple.dt.Xcode"
+        let context = WindowContext(path: "/worktrees/one", head: "ref: refs/heads/main")
+        let id = context.windowID(bundleIdentifier: bundle)
+        #expect(
+            WindowIdentity.resolve(
+                bundleIdentifier: bundle, nativeTitle: "Momentum", context: context,
+                previous: nil, matchingContextCount: 2, unavailableIDs: [],
+                makeRuntimeID: { "new-window" }
+            ) == "new-window"
+        )
+        #expect(
+            WindowIdentity.resolve(
+                bundleIdentifier: bundle, nativeTitle: "Momentum", context: context,
+                previous: nil, matchingContextCount: 1, unavailableIDs: [id],
+                makeRuntimeID: { "new-window" }
+            ) == "new-window"
+        )
+        // Reordering or closing a sibling must not promote an existing duplicate
+        // to the persisted identity of the other window.
+        for count in [1, 2] {
+            #expect(
+                WindowIdentity.resolve(
+                    bundleIdentifier: bundle, nativeTitle: "Momentum", context: context,
+                    previous: .init(id: "duplicate", nativeTitle: "Momentum", context: context),
+                    matchingContextCount: count, unavailableIDs: [id]
+                ) == "duplicate"
+            )
+        }
+    }
+
+    @Test func unavailableContextDropsOldIdentityAndDoesNotRestoreFromATitle() {
+        let bundle = "com.microsoft.VSCode"
+        let context = WindowContext(path: "/worktrees/one", head: "ref: refs/heads/main")
+        let previous = WindowIdentity.Previous(
+            id: context.windowID(bundleIdentifier: bundle), nativeTitle: "Code", context: context
+        )
+        for binding in [nil, previous] {
+            #expect(
+                WindowIdentity.resolve(
+                    bundleIdentifier: bundle, nativeTitle: "Code", context: nil,
+                    previous: binding, matchingContextCount: 0, unavailableIDs: [],
+                    makeRuntimeID: { "fresh" }
+                ) == "fresh"
+            )
+        }
+        #expect(
+            WindowIdentity.resolve(
+                bundleIdentifier: bundle, nativeTitle: "New Workspace", context: nil,
+                previous: .init(id: "old", nativeTitle: "Code", context: nil),
+                matchingContextCount: 0, unavailableIDs: [], makeRuntimeID: { "fresh" }
+            ) == "fresh"
+        )
+        #expect(
+            WindowIdentity.resolve(
+                bundleIdentifier: bundle, nativeTitle: "Code", context: nil,
+                previous: .init(id: "same", nativeTitle: "Code", context: nil),
+                matchingContextCount: 0, unavailableIDs: []
+            ) == "same"
+        )
+    }
+
+    @Test func identityDiagnosticsExplainChangesWithoutLoggingEveryPoll() throws {
+        let firstContext = WindowContext(path: "/one", head: "ref: refs/heads/main")
+        let secondContext = WindowContext(path: "/two", head: "ref: refs/heads/feature")
+        let date = Date(timeIntervalSinceReferenceDate: 1_000)
+        func observe(
+            _ previous: WindowIdentityDiagnostics?,
+            context: WindowContext?,
+            document: String?,
+            title: String = "Window",
+            hasSavedLabel: Bool = false
+        ) -> WindowIdentityDiagnostics {
+            WindowIdentityDiagnostics(
+                previous: previous,
+                windowID: context?.windowID(bundleIdentifier: "example.app") ?? "runtime",
+                bundleIdentifier: "example.app", nativeTitle: title, processIdentifier: 42,
+                document: document, context: context, contextError: nil,
+                matchingContextCount: context == nil ? 0 : 1,
+                hasSavedLabel: hasSavedLabel, now: date
+            )
+        }
+        let first = observe(nil, context: firstContext, document: "/one/First.swift")
+        #expect(first.sourceDescription == "Git worktree + HEAD")
+        #expect(first.isRestorable)
+        #expect(first.transitions.count == 1)
+        #expect(observe(first, context: firstContext, document: "/one/First.swift") == first)
+
+        let nextFile = observe(first, context: firstContext, document: "/one/Second.swift")
+        #expect(nextFile.windowID == first.windowID)
+        #expect(nextFile.transitions.last?.summary == "Document or title changed; identity preserved.")
+        let changed = observe(nextFile, context: secondContext, document: "/two/First.swift")
+        #expect(changed.transitions.last?.previousWindowID == first.windowID)
+        #expect(changed.transitions.last?.summary.contains("old tag detached") == true)
+        let returned = observe(changed, context: firstContext, document: "/one/First.swift", hasSavedLabel: true)
+        #expect(returned.transitions.last?.summary.contains("saved tag restored") == true)
+        let unavailable = observe(returned, context: nil, document: nil)
+        #expect(unavailable.sourceDescription == "Live window only")
+        #expect(!unavailable.isRestorable)
+
+        var history = first
+        for index in 0..<20 {
+            history = observe(
+                history, context: firstContext, document: "/one/File\(index).swift"
+            )
+        }
+        #expect(history.transitions.count == 10)
+        #expect(history.transitions.last?.id == 21)
+        #expect(Set(history.transitions.map(\.id)).count == 10)
+
+        let snapshot = WindowSnapshot(
+            updatedAt: date, windows: [], diagnostics: [history.windowID: history]
+        )
+        let encoded = try JSONEncoder().encode(snapshot)
+        #expect(try JSONDecoder().decode(WindowSnapshot.self, from: encoded) == snapshot)
+    }
+
+    @Test func identityDiagnosticsExposeAmbiguityAndResolutionErrors() {
+        let context = WindowContext(path: "/document.txt", head: nil)
+        let ambiguous = WindowIdentityDiagnostics(
+            previous: nil, windowID: "runtime", bundleIdentifier: "example.app",
+            nativeTitle: "Document", processIdentifier: 42, document: "/document.txt",
+            context: context, contextError: nil, matchingContextCount: 2,
+            hasSavedLabel: false, now: Date(timeIntervalSinceReferenceDate: 1_000)
+        )
+        #expect(ambiguous.sourceDescription == "Document path or URL")
+        #expect(!ambiguous.isRestorable)
+        #expect(ambiguous.matchingContextCount == 2)
+        #expect(ambiguous.transitions.last?.summary.contains("ambiguous") == true)
+        let failed = WindowIdentityDiagnostics(
+            previous: nil, windowID: "runtime", bundleIdentifier: "example.app",
+            nativeTitle: "Document", processIdentifier: 42, document: "/document.txt",
+            context: nil, contextError: "Permission denied", matchingContextCount: 0,
+            hasSavedLabel: false, now: Date(timeIntervalSinceReferenceDate: 1_000)
+        )
+        #expect(failed.contextError == "Permission denied")
+        #expect(failed.transitions.last?.summary.contains("could not be resolved") == true)
+    }
+
     @Test func oldLabelsAndSnapshotsRemainDecodable() throws {
         let labelData = Data(#"{"title":"Existing","color":"green"}"#.utf8)
         let label = try JSONDecoder().decode(WindowLabel.self, from: labelData)
@@ -89,6 +433,7 @@ struct OrchardTests {
         )
         let snapshot = try JSONDecoder().decode(WindowSnapshot.self, from: snapshotData)
         #expect(snapshot.activeWindowID == nil)
+        #expect(snapshot.diagnostics == nil)
         #expect(snapshot.windows.first?.agent == nil)
 
         let commandData = Data(
