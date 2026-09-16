@@ -3,7 +3,9 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var controller: OrchardController
+    @AppStorage(OrchardLaunchAtStartup.preferenceKey) private var launchOnStartup = true
     @State private var searchText = ""
+    @State private var launchOnStartupError: String?
 
     private var filteredWindows: [WindowRecord] {
         var matchingWindows = controller.windows
@@ -60,6 +62,8 @@ struct ContentView: View {
             }
 
             Divider()
+            launchOptions
+            Divider()
             footer
         }
         .frame(width: 420)
@@ -75,6 +79,32 @@ struct ContentView: View {
                     accessibilityTrusted: controller.isAccessibilityTrusted
                 )
             )
+        }
+    }
+
+    private var launchOptions: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Launch on startup", isOn: $launchOnStartup)
+                .onChange(of: launchOnStartup) {
+                    launchOnStartupChanged()
+                }
+
+            if let launchOnStartupError {
+                Text(launchOnStartupError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private func launchOnStartupChanged() {
+        do {
+            try OrchardLaunchAtStartup.setEnabled(launchOnStartup)
+            launchOnStartupError = nil
+        } catch {
+            launchOnStartupError = "Could not update startup setting: \(error.localizedDescription)"
         }
     }
 
