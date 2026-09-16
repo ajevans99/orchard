@@ -3,6 +3,19 @@ import Testing
 @testable import Orchard
 
 struct OrchardTests {
+    @Test @MainActor func launchOnStartupDefaultsToEnabledWithoutOverwritingAChoice() throws {
+        let suiteName = "OrchardTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        OrchardLaunchAtStartup.registerDefault(in: defaults)
+        #expect(defaults.bool(forKey: OrchardLaunchAtStartup.preferenceKey))
+
+        defaults.set(false, forKey: OrchardLaunchAtStartup.preferenceKey)
+        OrchardLaunchAtStartup.registerDefault(in: defaults)
+        #expect(!defaults.bool(forKey: OrchardLaunchAtStartup.preferenceKey))
+    }
+
     @Test func installationLocationRequiresAnApplicationsDirectory() {
         let home = URL(fileURLWithPath: "/Users/example", isDirectory: true)
 

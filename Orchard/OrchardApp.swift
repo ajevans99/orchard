@@ -59,6 +59,12 @@ private final class OrchardAppDelegate: NSObject, NSApplicationDelegate {
             showMoveToApplicationsAlert()
         }
         #endif
+
+        do {
+            try OrchardLaunchAtStartup.synchronize()
+        } catch {
+            NSLog("Unable to update Orchard's launch-on-startup setting: \(error)")
+        }
     }
 
     private func showTestWindow() {
